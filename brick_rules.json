@@ -1,0 +1,5 @@
+{
+  "ANK ERYAMAN":        { "districts": ["Etimesgut"],  "keywords": ["Eryaman"] },
+  "ANK AKKOPRU":        { "districts": ["Altındağ"],   "keywords": ["Akköprü", "Akkopru"] },
+  "ANK ÇANKAYA MERKEZ": { "districts": ["Çankaya"],    "keywords": ["Kızılay", "Kavaklıdere", "Bahçelievler"] }
+}
