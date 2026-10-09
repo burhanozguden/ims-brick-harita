@@ -358,7 +358,15 @@ def inject(html: str, payload: dict, ph_end: int) -> str:
     if k < len(html) and html[k] == ";":
         k += 1
     return html[:k] + "\n" + block + html[k:]
+KIRIKKALE_DISTRICTS = {"kirikkale", "keskin", "delice", "baliseyh", "karakecili",
+                       "yahsihan", "sulakyurt", "bahsili", "celebi"}
 
+
+def is_ankara(r) -> bool:
+    """AEO sayfası Kırıkkale ilini de listeliyor; onları ele."""
+    if "kirikkale" in norm(r["address"]):
+        return False
+    return norm(r["district"]) not in KIRIKKALE_DISTRICTS
 
 def main():
     ap = argparse.ArgumentParser()
@@ -368,6 +376,7 @@ def main():
 
     today = args.date or datetime.now(TZ).strftime("%Y-%m-%d")
     rows = scrape(args.date)
+      rows = [r for r in rows if is_ankara(r)]
     if len(rows) < MIN_EXPECTED:
         print(f"HATA: yalnızca {len(rows)} kayıt bulundu (min {MIN_EXPECTED}). "
               f"index.html'e dokunulmadı. debug/ klasörüne bakın.", file=sys.stderr)
