@@ -368,6 +368,7 @@ def is_ankara(r) -> bool:
         return False
     return norm(r["district"]) not in KIRIKKALE_DISTRICTS
 
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", help="YYYY-MM-DD (varsayılan: bugün, Europe/Istanbul)")
@@ -376,7 +377,7 @@ def main():
 
     today = args.date or datetime.now(TZ).strftime("%Y-%m-%d")
     rows = scrape(args.date)
-      rows = [r for r in rows if is_ankara(r)]
+    rows = [r for r in rows if is_ankara(r)]
     if len(rows) < MIN_EXPECTED:
         print(f"HATA: yalnızca {len(rows)} kayıt bulundu (min {MIN_EXPECTED}). "
               f"index.html'e dokunulmadı. debug/ klasörüne bakın.", file=sys.stderr)
