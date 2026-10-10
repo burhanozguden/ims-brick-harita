@@ -122,16 +122,16 @@ html,body{margin:0;height:100%;font-family:'Inter',system-ui,sans-serif;backgrou
 <div id="app">
 <aside id="side">
  <div id="hd"><h1>ANKARA IMS BRICK — HD</h1>
-  <p>Saydamsız yüksek çözünürlük • her brick farklı renk sınır çizgisi • 2.419 eczane</p>
+  <p>Saydamsız yüksek çözünürlük • her brick farklı renk sınır çizgisi • günlük nöbetçi eczaneler</p>
    <div class="nb-info" id="nb-info" style="display:none"></div></div>
  <div id="stats">
   <div class="st"><b id="s1">—</b><span>Brick</span></div>
-  <div class="st"><b id="s2">—</b><span>Eczane</span></div>
+  <div class="st"><b id="s2">—</b><span>Nöbetçi</span></div>
   <div class="st"><b id="s4">—</b><span>Kurum</span></div>
  </div>
  <div class="pane on" id="p-br">
   <div class="flt">
-   <input id="q-br" placeholder="Brick veya eczane ara…"/>
+   <input id="q-br" placeholder="Brick veya nöbetçi eczane ara…"/>
    <select id="f-grp"><option value="">Tüm bölge grupları</option></select>
     <label class="nbchk"><input type="checkbox" id="f-nb"/>🔴 Sadece bugün nöbetçisi olan brick'ler</label>
   </div>
@@ -614,7 +614,6 @@ const GJ={"type": "FeatureCollection", "features": [{"type": "Feature", "propert
 const ALLB=Object.keys(META).sort();
 const LC={}; ALLB.forEach((b,i)=>LC[b]=`hsl(${(i*137.508)%360},88%,60%)`);
 document.getElementById('s1').textContent=ALLB.length;
-document.getElementById('s2').textContent=Object.values(PH).reduce((a,v)=>a+v.length,0).toLocaleString('tr');
 document.getElementById('s4').textContent=HOSP.length;
 const R=document.documentElement.style;
 
@@ -630,6 +629,7 @@ const nbTotal=Object.values(NB.bricks).reduce((a,v)=>a+v.length,0);
 const nbBrickCount=ALLB.filter(b=>nbList(b).length).length;
 const nbPhone=t=>{const d=String(t||'').replace(/\D/g,'');return d.length===11?`${d.slice(0,4)} ${d.slice(4,7)} ${d.slice(7,9)} ${d.slice(9)}`:String(t||'')};
 const eM={};
+document.getElementById('s2').textContent=nbTotal.toLocaleString('tr');
 (function(){const el=document.getElementById('nb-info');
  if(!nbTotal){el.style.display='none';return;}
  const today=new Date().toLocaleDateString('sv-SE',{timeZone:'Europe/Istanbul'});
@@ -672,10 +672,10 @@ for(const b of ALLB){ if(!CENT[b])continue;
  const m=L.marker([CENT[b][1],CENT[b][0]],{interactive:true,
   icon:L.divIcon({className:'blab4'+(big?' big':''),html:b.replace('ANKARA ','').replace('ANK ',''),iconSize:null})});
  m.on('click',()=>pick(b,false)); labG.addLayer(m);}
-for(const b of ALLB){ if(!CENT[b]||!PH[b])continue;
+for(const b of ALLB){ if(!CENT[b]||!nbList(b).length)continue;
  const nn=nbList(b).length;
  const m=L.marker([CENT[b][1]-0.0028,CENT[b][0]],{icon:L.divIcon({className:'eicon4'+(nn?' nb':''),html:nn?String(nn):'E',iconSize:[14,14]})});
- m.bindPopup(`<div class="pp"><b>${b}</b><br/>${PH[b].length} eczane<span class="tag">${META[b].g}</span>${nn?`<br/><span class="tag nbtag">🔴 bugün ${nn} nöbetçi</span>`:''}<br/><button onclick="window.__pb('${b}')">Eczane listesini aç</button></div>`);
+ m.bindPopup(`<div class="pp"><b>${b}</b><span class="tag">${META[b].g}</span><br/><span class="tag nbtag">🔴 bugün ${nn} nöbetçi</span><br/><button onclick="window.__pb('${b}')">Nöbetçileri göster</button></div>`);
  eG.addLayer(m); eM[b]=m;}
 HOSP.forEach(h=>{ if(h.lat==null)return;
  const m=L.marker([h.lat,h.lon],{icon:L.divIcon({className:'hicon4'+(h.ap?' ap':''),html:'🩺',iconSize:[16,16]})});
@@ -724,10 +724,10 @@ function drawBr(){
  const g=grpSel.value, onlyNb=document.getElementById('f-nb').checked; lst.innerHTML='';
  ALLB.forEach(b=>{ if(g&&META[b].g!==g)return; if(onlyNb&&!nbList(b).length)return;
   let hit=!q||b.toLocaleUpperCase('tr').includes(q),sub='';
-  if(!hit&&q.length>=3){const f=(PH[b]||[]).find(p=>p.toLocaleUpperCase('tr').includes(q));if(f){hit=true;sub=f}}
+  if(!hit&&q.length>=3){const f=nbList(b).find(n=>(n.name||'').toLocaleUpperCase('tr').includes(q));if(f){hit=true;sub='🔴 '+f.name.replace(/\s+/g,' ').trim()}}
   if(!hit)return;
   const d=document.createElement('div');d.className='row'+(SEL===b?' sel':'');
-  d.innerHTML=`<span class="sw" style="background:${LC[b]}"></span><span class="nm">${b}${sub?`<div style="font-weight:500;font-size:9px;color:var(--acc)">→ ${sub}</div>`:''}</span>${nbList(b).length?`<span class="nbc" title="Bugün nöbetçi">${nbList(b).length}</span>`:''}<span class="ct"><span><b>${META[b].e}</b>e</span></span>`;
+  d.innerHTML=`<span class="sw" style="background:${LC[b]}"></span><span class="nm">${b}${sub?`<div style="font-weight:500;font-size:9px;color:var(--acc)">→ ${sub}</div>`:''}</span>${nbList(b).length?`<span class="nbc" title="Bugün nöbetçi">${nbList(b).length}</span>`:''}`;
   d.onclick=()=>pick(b,true); lst.appendChild(d);});
 }
 document.getElementById('q-br').oninput=drawBr; grpSel.onchange=drawBr; document.getElementById('f-nb').onchange=nbApplyFilter;
@@ -739,7 +739,7 @@ function pick(b,zoom){SEL=b;restyle();
  dtB=b;
  document.getElementById('dt-dot').style.background=LC[b];
  document.getElementById('dt-t').childNodes[0].textContent=b;
- document.getElementById('dt-m').textContent=`${META[b].g} • ${META[b].e} eczane`+(nbList(b).length?` • 🔴 ${nbList(b).length} nöbetçi`:'');
+ document.getElementById('dt-m').textContent=`${META[b].g}`+(nbList(b).length?` • 🔴 ${nbList(b).length} nöbetçi`:'');
    dt.classList.add('on');dtBody();drawBr();}
 function dtBody(){const el=document.getElementById('dt-body');el.innerHTML='';const b=dtB;if(!b)return;
  if(dtTab==='e'){
@@ -753,11 +753,7 @@ function dtBody(){const el=document.getElementById('dt-body');el.innerHTML='';co
      a.href='tel:'+String(n.phone).replace(/[^\d+]/g,'');a.textContent='📞 '+nbPhone(n.phone);ph.appendChild(a);it.appendChild(ph);}
     bx.appendChild(it);});
    el.appendChild(bx);}
-  const ol=document.createElement('ol');
-  [...(PH[b]||[])].sort((a,c)=>Number(nbIs(b,c))-Number(nbIs(b,a))).forEach(p=>{const li=document.createElement('li');li.textContent=p;
-   if(nbIs(b,p)){li.className='nb';const t=document.createElement('span');t.className='nbbadge';t.textContent='NÖBETÇİ';li.appendChild(t);}
-   ol.appendChild(li)});
-  el.appendChild(ol);}
+  else{const p=document.createElement('p');p.style.color='var(--tx2)';p.textContent="Bugün bu brick'te nöbetçi eczane yok.";el.appendChild(p);}}
  }
 drawBr();scale();
 </script></body></html>
