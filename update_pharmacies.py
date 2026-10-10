@@ -420,8 +420,12 @@ def match_bricks(rows, ph_items, groups, rules):
         # 1) PH içinde birebir ad eşleşmesi
         cands = sorted(idx.get(key, []))
         if cands:
-            pool = [b for b in cands if compatible(b, dist_n)] or cands
-            if len(pool) == 1:
+            pool = [b for b in cands if compatible(b, dist_n)]
+            if not pool:
+                # Ad PH'de var ama hiçbir aday brick eczanenin ilçesiyle uyumlu değil:
+                # aynı isimli başka bir eczane olabilir -> sessizce atama, raporla.
+                reason, cands_out = "district-mismatch", cands
+            elif len(pool) == 1:
                 chosen, how = pool[0], "ph-name"
             else:
                 w = pick_unique(pool, hay, dist_n, rules, groups)
