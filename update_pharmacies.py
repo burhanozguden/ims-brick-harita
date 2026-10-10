@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
 """
-Ankara Eczacı Odası nöbetçi eczanelerini çeker ve index.html içindeki
-PH (brick -> eczane) yapısına göre bricklere eşleyip NOBET nesnesi olarak yazar.
+Ankara Eczacı Odası nöbetçi eczanelerini çeker, index.html içindeki PH
+(brick -> eczane adları) yapısına göre bricklere eşler ve NOBET verisini
+index.html'e AYRI bir <script id="nobet-data"> bloğu olarak yazar.
+
+NOT: PH ve diğer değişkenler tek bir "const GJ=..., PH=..., BRANS=..." zincirinde
+olduğu için PH'nin yanına kod eklemek JS'i bozar. Bu yüzden NOBET, ana script'ten
+ÖNCE gelen ayrı bir <script> bloğuna yazılır; PH'ye hiç dokunulmaz.
 
 Eşleştirme sırası:
-  1) Nöbetçi eczane adı, PH içindeki brick bloğunda geçiyorsa -> o brick
-  2) brick_rules.json içindeki ilçe/mahalle anahtar kelimeleri
-  3) Eşleşmeyenler unmatched.json'a yazılır
+  1) Nöbetçi eczane adı PH içinde BİREBİR (ECZANESİ ekini yok sayarak) geçiyorsa -> o brick
+     (aynı ad birden çok brickte varsa ilçe/mahalle ipuçlarıyla seçilir)
+  2) PH'de yoksa brick_rules.json + brick adındaki mahalle ipuçları
+  3) Eşleşmeyenler unmatched.json'a (nedeniyle birlikte) yazılır
+
+Kullanım:
+  python update_pharmacies.py                 # siteden çek, index.html'i güncelle
+  python update_pharmacies.py --dry-run       # yazmadan özet göster
+  python update_pharmacies.py --rows-json x.json   # scrape etmeden, hazır JSON listesiyle
 """
 import argparse
 import json
@@ -15,9 +26,7 @@ import sys
 import unicodedata
 from datetime import datetime
 from pathlib import Path
-
 from zoneinfo import ZoneInfo
-from bs4 import BeautifulSoup
 
 URL = "https://www.aeo.org.tr/nobetci-eczaneler"
 TZ = ZoneInfo("Europe/Istanbul")
@@ -27,8 +36,6 @@ RULES_FILE = ROOT / "brick_rules.json"
 UNMATCHED_FILE = ROOT / "unmatched.json"
 DEBUG_DIR = ROOT / "debug"
 
-START = "/* NOBET:START */"
-END = "/* NOBET:END */"
 MIN_EXPECTED = 20  # bunun altında veri gelirse dosyaya DOKUNMA (scrape bozulmuş demektir)
 
 DISTRICTS = [
@@ -38,6 +45,33 @@ DISTRICTS = [
     "Keskin", "Kırıkkale", "Kızılcahamam", "Mamak", "Nallıhan", "Polatlı",
     "Pursaklar", "Sincan", "Sulakyurt", "Şereflikoçhisar", "Yahşihan", "Yenimahalle",
 ]
+
+# AEO sayfası Kırıkkale ilini de listeliyor; Ankara haritasında istemiyoruz.
+KIRIKKALE_DISTRICTS = {"kirikkale", "keskin", "delice", "baliseyh", "karakecili",
+                       "yahsihan", "sulakyurt", "bahsili", "celebi"}
+
+# Brick grubu -> o gruptaki bricklerde bulunabilecek ilçeler (sadece aday SÜZMEK için).
+GROUP_DISTRICTS = {
+    "sincan etimesgut": {"sincan", "etimesgut"},
+    "yenimahalle batikent": {"yenimahalle"},
+    "kecioren pursaklar": {"kecioren", "pursaklar", "altindag"},
+    "altindag ulus": {"altindag", "kecioren"},
+    "mamak": {"mamak", "cankaya"},
+    "cankaya merkez": {"cankaya", "mamak", "altindag"},
+    "guneybati koridoru": {"cankaya", "yenimahalle", "etimesgut", "golbasi"},
+    "cevre ilceler": {"akyurt", "ayas", "bala", "beypazari", "camlidere", "cubuk", "elmadag",
+                      "golbasi", "gudul", "haymana", "kalecik", "kazan", "kizilcahamam",
+                      "nallihan", "polatli", "sereflikochisar"},
+}
+
+# Beraberlikte: ilçenin "ana" brick grubuna +1 puan
+PRIMARY_GROUP = {
+    "sincan": "sincan etimesgut", "etimesgut": "sincan etimesgut",
+    "yenimahalle": "yenimahalle batikent",
+    "kecioren": "kecioren pursaklar", "pursaklar": "kecioren pursaklar",
+    "altindag": "altindag ulus", "mamak": "mamak", "cankaya": "cankaya merkez",
+}
+
 
 # ----------------------------------------------------------------- yardımcılar
 _TR = str.maketrans("İIıŞşĞğÜüÖöÇç", "iiissgguuoocc")
@@ -56,13 +90,23 @@ def core_name(name: str) -> str:
     return " ".join(t for t in norm(name).split() if t not in STOP)
 
 
+# Adreste farklı yazılan ilçe adları -> AEO'daki ilçe adı
+DISTRICT_ALIASES = {"Kahramankazan": "Kazan"}
+
+
 def detect_district(text: str) -> str:
     t = f" {norm(text)} "
-    best = ""
-    for d in DISTRICTS:
-        if f" {norm(d)} " in t and len(d) > len(best):
-            best = d
+    best, best_len = "", 0
+    for name, canon in [(d, d) for d in DISTRICTS] + list(DISTRICT_ALIASES.items()):
+        if f" {norm(name)} " in t and len(name) > best_len:
+            best, best_len = canon, len(name)
     return best
+
+
+def is_ankara(r) -> bool:
+    if "kirikkale" in norm(r.get("address", "")):
+        return False
+    return norm(r.get("district", "")) not in KIRIKKALE_DISTRICTS
 
 
 PHONE_RE = re.compile(r"(?:\+?90\s*)?0?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}")
@@ -127,11 +171,12 @@ def _row_from_texts(texts, forced_name=None):
 
 
 def rows_from_dom(html):
+    from bs4 import BeautifulSoup
+
     soup = BeautifulSoup(html, "lxml")
     for t in soup(["script", "style", "nav", "footer", "header", "select"]):
         t.decompose()
     rows = []
-    # a) tablo
     for tr in soup.select("table tr"):
         cells = [c.get_text(" ", strip=True) for c in tr.find_all("td")]
         if len(cells) >= 2 and any("eczane" in norm(c) for c in cells):
@@ -140,7 +185,6 @@ def rows_from_dom(html):
                 rows.append(r)
     if rows:
         return rows
-    # b) kart yapısı: "... ECZANESİ" yazan yaprak elementler
     for el in soup.find_all(True):
         if el.find(True) is not None:
             continue
@@ -189,7 +233,7 @@ def scrape(date_iso: str):
         page.on("response", on_response)
         page.goto(URL, wait_until="networkidle", timeout=60_000)
 
-        if date_iso:  # sadece --date verilirse tarih alanını doldurmayı dene
+        if date_iso:
             try:
                 page.locator("input[type=date], input[name*=arih i], input[id*=arih i]") \
                     .first.fill(date_iso, timeout=3000)
@@ -230,7 +274,6 @@ def scrape(date_iso: str):
         rows = rows_from_dom(html)
         source = "dom"
 
-    # tekilleştir
     seen, out = set(), []
     for r in rows:
         k = (core_name(r["name"]), norm(r["district"]))
@@ -241,8 +284,9 @@ def scrape(date_iso: str):
     return out
 
 
-# ----------------------------------------------------------------- PH PARSE
-PH_RE = re.compile(r"(?:\b(?:const|let|var)\s+)?\bPH\s*=\s*\{")
+# ----------------------------------------------------------------- JS NESNE OKUMA
+PH_RE = re.compile(r"\bPH\s*=\s*\{")
+META_RE = re.compile(r"\bMETA\s*=\s*\{")
 IDENT_KEY = re.compile(r"([A-Za-z_$][\w$]*)\s*:")
 
 
@@ -295,110 +339,176 @@ def scan_object(src: str, start: int):
         elif c == "," and depth == 1:
             close(i)
         i += 1
-    raise ValueError("PH nesnesinin kapanış parantezi bulunamadı")
+    raise ValueError("JS nesnesinin kapanış parantezi bulunamadı")
 
 
-def load_ph(html: str):
+def load_ph(html: str) -> dict:
+    """PH -> {brick: [eczane adı, ...]}"""
     m = PH_RE.search(html)
     if not m:
         raise SystemExit("HATA: index.html içinde 'PH = {' bulunamadı.")
-    end, entries = scan_object(html, m.end() - 1)
-    bricks = {k: f" {norm(html[s:e])} " for k, s, e in entries}
-    return bricks, end
+    _, entries = scan_object(html, m.end() - 1)
+    out = {}
+    for k, s, e in entries:
+        txt = html[s:e].strip()
+        try:
+            arr = json.loads(txt)
+        except Exception:
+            arr = re.findall(r'"((?:[^"\\]|\\.)*)"', txt)
+        out[k] = [a for a in arr if isinstance(a, str)]
+    return out
+
+
+def load_groups(html: str) -> dict:
+    """META -> {brick: normalize edilmiş grup adı}  (bulunamazsa boş)"""
+    m = META_RE.search(html)
+    if not m:
+        return {}
+    try:
+        end, _ = scan_object(html, m.end() - 1)
+        meta = json.loads(html[m.end() - 1:end + 1])
+        return {b: norm(v.get("g", "")) for b, v in meta.items()}
+    except Exception:
+        return {}
 
 
 # ----------------------------------------------------------------- EŞLEŞTİRME
-def match_bricks(rows, brick_text, rules):
+def brick_score(brick, hay, dist_n, rules, groups):
+    rule = rules.get(brick, {})
+    s = sum(4 for kw in rule.get("keywords", []) if f" {norm(kw)} " in hay)
+    if dist_n and any(norm(d) == dist_n for d in rule.get("districts", [])):
+        s += 1
+    if dist_n and PRIMARY_GROUP.get(dist_n) and groups.get(brick) == PRIMARY_GROUP[dist_n]:
+        s += 1
+    toks = [t for t in norm(brick).split()
+            if t not in ("ank", "ankara") and len(t) > 2 and not t.isdigit()]
+    s += sum(2 for t in toks if f" {t} " in hay)
+    return s
+
+
+def pick_unique(cands, hay, dist_n, rules, groups):
+    """Skora göre tek bir kazanan döndür; beraberlikte None."""
+    scored = sorted(((brick_score(b, hay, dist_n, rules, groups), b) for b in cands), reverse=True)
+    if not scored or scored[0][0] <= 0:
+        return None
+    if len(scored) > 1 and scored[1][0] == scored[0][0]:
+        return None
+    return scored[0][1]
+
+
+def match_bricks(rows, ph_items, groups, rules):
+    idx = {}
+    for b, names in ph_items.items():
+        for n in names:
+            c = core_name(n)
+            if c:
+                idx.setdefault(c, set()).add(b)
+
+    all_bricks = list(ph_items.keys())
     result, unmatched = {}, []
+
+    def compatible(b, dist_n):
+        allowed = GROUP_DISTRICTS.get(groups.get(b, ""))
+        return allowed is None or not dist_n or dist_n in allowed
+
     for r in rows:
         key = core_name(r["name"])
-        addr_tokens = set(norm(r["address"] + " " + r["district"]).split())
-        chosen, how = None, None
+        dist_n = norm(r.get("district", ""))
+        hay = f" {norm(r.get('address', '') + ' ' + r.get('district', ''))} "
+        chosen, how, reason, cands_out = None, None, None, []
 
-        # 1) PH içinde eczane adı geçiyor mu?
-        if len(key) >= 4:
-            cands = [(b, len(addr_tokens & set(t.split())))
-                     for b, t in brick_text.items() if f" {key} " in t]
-            if cands:
-                chosen, how = max(cands, key=lambda x: x[1])[0], "ph-name"
+        # 1) PH içinde birebir ad eşleşmesi
+        cands = sorted(idx.get(key, []))
+        if cands:
+            pool = [b for b in cands if compatible(b, dist_n)] or cands
+            if len(pool) == 1:
+                chosen, how = pool[0], "ph-name"
+            else:
+                w = pick_unique(pool, hay, dist_n, rules, groups)
+                if w:
+                    chosen, how = w, "ph-name+ipucu"
+                else:
+                    reason, cands_out = "ambiguous", pool
 
-        # 2) brick_rules.json (ilçe / mahalle anahtar kelimeleri)
-        if not chosen:
-            hay = f" {norm(r['address'] + ' ' + r['district'])} "
-            best, best_score = None, 0
-            for b, rule in rules.items():
-                if b not in brick_text:
-                    continue
-                score = sum(2 for kw in rule.get("keywords", []) if f" {norm(kw)} " in hay)
-                if any(norm(d) == norm(r["district"]) for d in rule.get("districts", [])):
-                    score += 1
-                if score > best_score:
-                    best, best_score = b, score
-            if best:
-                chosen, how = best, "rule"
+        # 2) PH'de yok -> kurallar / mahalle ipuçları
+        if not chosen and not cands:
+            pool = [b for b in all_bricks if compatible(b, dist_n)] or all_bricks
+            w = pick_unique(pool, hay, dist_n, rules, groups)
+            if w:
+                chosen, how = w, "rule"
+            else:
+                reason = "not-in-ph-no-rule"
 
         item = {**r, "key": key, "match": how}
         if chosen:
             result.setdefault(chosen, []).append(item)
         else:
-            unmatched.append(r)
+            unmatched.append({**r, "reason": reason, "candidates": cands_out})
     return result, unmatched
 
 
 # ----------------------------------------------------------------- HTML YAZMA
-def inject(html: str, payload: dict, ph_end: int) -> str:
+DATA_RE = re.compile(r'<script id="nobet-data">.*?</script>\s*', re.S)
+LEGACY_RE = re.compile(r"\n?/\* NOBET:START \*/.*?/\* NOBET:END \*/", re.S)
+
+
+def clean_html(html: str) -> str:
+    """Eski (bozuk) satır içi NOBET bloklarını ve eski veri script'ini temizle."""
+    html = DATA_RE.sub("", html)
+    return LEGACY_RE.sub("", html)
+
+
+def inject(html: str, payload: dict) -> str:
+    html = clean_html(html)
+    m = PH_RE.search(html)
+    if not m:
+        raise SystemExit("HATA: PH bulunamadı.")
+    pos = html.rfind("<script", 0, m.start())
+    if pos < 0:
+        raise SystemExit("HATA: PH'yi içeren <script> etiketi bulunamadı.")
     js = json.dumps(payload, ensure_ascii=False, indent=1, sort_keys=True).replace("</", "<\\/")
-    block = f"{START}\nconst NOBET = {js};\n{END}"
-    if START in html and END in html:
-        s, e = html.index(START), html.index(END) + len(END)
-        return html[:s] + block + html[e:]
-    k = ph_end + 1
-    while k < len(html) and html[k] in " \t":
-        k += 1
-    if k < len(html) and html[k] == ";":
-        k += 1
-    return html[:k] + "\n" + block + html[k:]
-KIRIKKALE_DISTRICTS = {"kirikkale", "keskin", "delice", "baliseyh", "karakecili",
-                       "yahsihan", "sulakyurt", "bahsili", "celebi"}
-
-
-def is_ankara(r) -> bool:
-    """AEO sayfası Kırıkkale ilini de listeliyor; onları ele."""
-    if "kirikkale" in norm(r["address"]):
-        return False
-    return norm(r["district"]) not in KIRIKKALE_DISTRICTS
+    block = ('<script id="nobet-data">\n/* NOBET:START */\n'
+             f"const NOBET = {js};\n/* NOBET:END */\n</script>\n")
+    return html[:pos] + block + html[pos:]
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", help="YYYY-MM-DD (varsayılan: bugün, Europe/Istanbul)")
-    ap.add_argument("--dry-run", action="store_true", help="dosyaya yazma, sadece özet bas")
+    ap.add_argument("--dry-run", action="store_true", help="dosyaya yazma, özet bas")
+    ap.add_argument("--rows-json", help="scrape etme; bu JSON listesini kullan (test için)")
     args = ap.parse_args()
 
     today = args.date or datetime.now(TZ).strftime("%Y-%m-%d")
-    rows = scrape(args.date)
+    if args.rows_json:
+        rows = json.loads(Path(args.rows_json).read_text(encoding="utf-8"))
+    else:
+        rows = scrape(args.date)
+
     rows = [r for r in rows if is_ankara(r)]
     if len(rows) < MIN_EXPECTED:
-        print(f"HATA: yalnızca {len(rows)} kayıt bulundu (min {MIN_EXPECTED}). "
+        print(f"HATA: yalnızca {len(rows)} Ankara kaydı bulundu (min {MIN_EXPECTED}). "
               f"index.html'e dokunulmadı. debug/ klasörüne bakın.", file=sys.stderr)
         sys.exit(1)
 
-    html = HTML_FILE.read_text(encoding="utf-8")
-    brick_text, ph_end = load_ph(html)
+    html = clean_html(HTML_FILE.read_text(encoding="utf-8"))
+    ph_items = load_ph(html)
+    groups = load_groups(html)
     rules = json.loads(RULES_FILE.read_text(encoding="utf-8")) if RULES_FILE.exists() else {}
 
-    by_brick, unmatched = match_bricks(rows, brick_text, rules)
+    by_brick, unmatched = match_bricks(rows, ph_items, groups, rules)
     matched = sum(len(v) for v in by_brick.values())
     print(f"[match] toplam={len(rows)} eşleşen={matched} eşleşmeyen={len(unmatched)} "
           f"brick={len(by_brick)}")
+    for u in unmatched:
+        print(f"   - {u['name']} ({u['district']}): {u['reason']} {u['candidates'] or ''}")
 
     payload = {"date": today, "total": len(rows), "matched": matched, "bricks": by_brick}
 
     if args.dry_run:
-        print(json.dumps(payload, ensure_ascii=False, indent=1)[:3000])
         return
 
-    HTML_FILE.write_text(inject(html, payload, ph_end), encoding="utf-8")
+    HTML_FILE.write_text(inject(html, payload), encoding="utf-8")
     UNMATCHED_FILE.write_text(
         json.dumps({"date": today, "items": unmatched}, ensure_ascii=False, indent=1),
         encoding="utf-8")

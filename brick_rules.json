@@ -1,5 +1,16 @@
 {
-  "ANK ERYAMAN":        { "districts": ["Etimesgut"],  "keywords": ["Eryaman"] },
-  "ANK AKKOPRU":        { "districts": ["Altındağ"],   "keywords": ["Akköprü", "Akkopru"] },
-  "ANK ÇANKAYA MERKEZ": { "districts": ["Çankaya"],    "keywords": ["Kızılay", "Kavaklıdere", "Bahçelievler"] }
+  "_aciklama": "Eczane adı index.html'deki PH listesinde bulunamazsa devreye girir. 'keywords' = adreste geçen mahalle/semt (güçlü ipucu), 'districts' = AEO'daki ilçe (zayıf ipucu). Brick adlarındaki kelimeler (ERYAMAN, ATAPARK, KIZILAY...) zaten otomatik ipucu sayılır. Beraberlikte eczane 'eşleşmeyen' olarak unmatched.json'a yazılır.",
+
+  "ANK GOLBASI":            { "districts": ["Gölbaşı"] },
+  "ANK CUBUK":              { "districts": ["Çubuk"] },
+  "ANK BATI ILCELER":       { "districts": ["Beypazarı", "Ayaş", "Nallıhan", "Güdül"] },
+  "ANK KUZEY ILCELER":      { "districts": ["Kızılcahamam", "Kazan", "Çamlıdere"] },
+  "ANK DOGU ILCELER":       { "districts": ["Akyurt", "Elmadağ", "Kalecik"] },
+  "ANK GUNEY ILCELER":      { "districts": ["Haymana", "Bala", "Şereflikoçhisar"] },
+  "ANK POLATLI -1":         { "districts": ["Polatlı"] },
+  "ANK POLATLI -2":         { "districts": ["Polatlı"] },
+  "ANK SOLFASOL+PURSAKLAR": { "districts": ["Pursaklar"] },
+  "ANK ERYAMAN":            { "keywords": ["Eryaman"] },
+  "ANK CAYYOLU+UMIT":       { "keywords": ["Ümitköy", "İncek", "Beytepe", "Konutkent", "Yaşamkent"] },
+  "ANK ATAPARK+23 NISAN":   { "keywords": ["Atapark", "23 Nisan"] }
 }
