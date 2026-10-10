@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="tr"><head><meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <title>Ankara 2026 — Yeni Brick Dağılımı (5 Kişi)</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -74,6 +74,33 @@ html,body,#map{margin:0;height:100%;font-family:'Inter',system-ui,sans-serif;bac
 .eicon4{width:14px;height:14px;border-radius:50%;background:#fbbf24;color:#2a1a00;border:1.5px solid #fff;font:800 8.5px/11px 'Inter';text-align:center;
  box-shadow:0 1px 5px rgba(0,0,0,.7);transform:scale(var(--es,1));transition:transform .2s;animation:nbp 1.7s infinite;cursor:pointer}
 @keyframes nbp{0%{box-shadow:0 0 0 0 rgba(251,191,36,.75),0 1px 5px rgba(0,0,0,.7)}70%{box-shadow:0 0 0 10px rgba(251,191,36,0),0 1px 5px rgba(0,0,0,.7)}100%{box-shadow:0 0 0 0 rgba(251,191,36,0),0 1px 5px rgba(0,0,0,.7)}}
+
+/* —— MOBİL: panel alttan açılan çekmece —— */
+@supports(height:100dvh){html,body,#map{height:100dvh}}
+.leaflet-popup-content{max-height:50vh;overflow-y:auto}
+@media(max-width:700px){
+ #lg{left:0;right:0;top:auto;bottom:0;width:auto;height:46vh;max-width:none;border-radius:16px 16px 0 0;border-width:1px 0 0;
+  padding:6px 12px calc(10px + env(safe-area-inset-bottom));box-shadow:0 -8px 30px rgba(0,0,0,.5)}
+ @supports(height:100dvh){#lg{height:46dvh}}
+ #lg.min{height:auto}
+ #lg::before{content:'';display:block;width:38px;height:4px;border-radius:4px;background:rgba(148,163,184,.45);margin:0 auto 6px}
+ #lgh{cursor:pointer}
+ #lgx{width:34px;height:34px;font-size:14px}
+ #lg h1{font-size:12px}
+ #lg p{font-size:9.5px}
+ #q{font-size:16px;padding:9px 10px}
+ .per{padding:9px 6px}
+ .per .nm{font-size:11.5px}
+ .eye{font-size:17px;padding:6px 4px}
+ .nbitem{padding:9px 8px}
+ .nbitem b{font-size:12px}.nbitem small{font-size:10.5px}
+ .nbitem a{display:inline-block;padding:4px 0}
+ .bt{padding:6px 0;font-size:10px}
+ #ortak{display:none}
+ .mctl button{padding:8px 10px}
+ .leaflet-control-zoom,.leaflet-control-scale{display:none}
+ .leaflet-popup-content{max-width:72vw}
+}
 </style></head><body>
 <div id="map"></div>
 <div id="lg">
@@ -556,6 +583,7 @@ const GJ={"type": "FeatureCollection", "features": [{"type": "Feature", "propert
 const R=document.documentElement.style;
 const map=L.map('map',{zoomControl:true,zoomSnap:.25,wheelPxPerZoomLevel:90}).setView([39.93,32.80],10.5);
 map.zoomControl.setPosition('bottomright');
+if(map.attributionControl&&window.matchMedia('(max-width:700px)').matches)map.attributionControl.setPosition('topleft');
 L.control.scale({imperial:false,position:'bottomright'}).addTo(map);
 const sat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:21,attribution:'Esri'});
 const ref=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:21,pane:'shadowPane'});
@@ -594,7 +622,7 @@ const geo=L.geoJSON(GJ,{style:styleOf,onEachFeature:(f,l)=>{LAYERS.push(l);
   <table><tr><td>Eczane</td><td><b>${m.ecz??'-'}</b></td></tr>
   <tr><td>Probiyotik Pazar</td><td><b>${(m.prob??0).toLocaleString('tr')}</b></td></tr>
   <tr><td>Caps Pazar</td><td><b>${(m.caps??0).toLocaleString('tr')}</b></td></tr>
-  <tr><td>Sıvı Pazar</td><td><b>${(m.sivi??0).toLocaleString('tr')}</b></td></tr></table>${nbHtml(b)}</div>`);
+  <tr><td>Sıvı Pazar</td><td><b>${(m.sivi??0).toLocaleString('tr')}</b></td></tr></table>${nbHtml(b)}</div>`,{maxWidth:260,autoPanPaddingTopLeft:[10,60]});
  l.on('mouseover',()=>l.setStyle({weight:3}));
  l.on('mouseout',()=>l.setStyle({weight:1.6}));
 }}).addTo(map);
@@ -623,6 +651,9 @@ const tel=t=>String(t||'').replace(/[^\d+]/g,'');
 const nbPhone=t=>{const d=String(t||'').replace(/\D/g,'');return d.length===11?`${d.slice(0,4)} ${d.slice(4,7)} ${d.slice(7,9)} ${d.slice(9)}`:String(t||'')};
 const sn=s=>String(s||'').toLocaleLowerCase('tr').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/ı/g,'i');
 const short=b=>b.replace('ANKARA ','').replace('ANK ','');
+const lg=document.getElementById('lg'),lgx=document.getElementById('lgx');
+const isM=()=>window.matchMedia('(max-width:700px)').matches;
+function setMin(v){lg.classList.toggle('min',v);lgx.textContent=v?(isM()?'▴':'▸'):'▾';}
 function nbHtml(b){const n=nbList(b);
  if(!n.length)return '<div style="margin-top:7px;color:#94a3b8">Bugün nöbetçi eczane yok.</div>';
  return `<div style="margin-top:8px;padding-top:6px;border-top:1px dashed rgba(148,163,184,.3)"><b style="color:#fca5a5">🔴 Bugün nöbetçi (${n.length})</b>`+
@@ -631,10 +662,10 @@ function nbHtml(b){const n=nbList(b);
 const OWNED={}; for(const b in OWN)OWN[b].forEach(p=>(OWNED[p]=OWNED[p]||[]).push(b));
 const BL={}; LAYERS.forEach(l=>{const b=l.feature.properties.full;(BL[b]=BL[b]||[]).push(l)});
 const ll=b=>L.latLng(CENT[b][1],CENT[b][0]);
-function openB(b){if(BL[b]&&CENT[b])BL[b][0].openPopup(ll(b));}
-function focusBrick(b){const ls=BL[b];if(!ls)return;
+function openB(b){if(isM())setMin(true);if(BL[b]&&CENT[b])BL[b][0].openPopup(ll(b));}
+function focusBrick(b){const ls=BL[b];if(!ls)return;if(isM())setMin(true);
  let bd=null;ls.forEach(l=>{const x=l.getBounds();bd=bd?bd.extend(x):L.latLngBounds(x.getSouthWest(),x.getNorthEast())});
- map.flyToBounds(bd.pad(.25),{duration:.8});setTimeout(()=>openB(b),900);}
+ map.flyToBounds(bd.pad(.25),{duration:.8,paddingBottomRight:isM()?[0,70]:[0,0]});setTimeout(()=>openB(b),900);}
 
 // haritada nöbetçi rozetleri
 const nbG=L.layerGroup().addTo(map), badges={};
@@ -684,7 +715,8 @@ function render(){pl.innerHTML='';const q=sn(Q.trim());
   pl.appendChild(body);}
  if(q&&!pl.children.length)pl.innerHTML='<div class="none" style="padding:8px">Bu isimde nöbetçi eczane yok.</div>';}
 document.getElementById('q').oninput=e=>{Q=e.target.value;render();};
-document.getElementById('lgx').onclick=e=>{const g=document.getElementById('lg');g.classList.toggle('min');e.target.textContent=g.classList.contains('min')?'▸':'▾';};
+lgx.onclick=e=>{e.stopPropagation();setMin(!lg.classList.contains('min'));};
+document.getElementById('lgh').onclick=()=>{if(isM())setMin(!lg.classList.contains('min'));};
 render();
 
 function mkCtl(pos,defs){const C=L.Control.extend({onAdd(){
