@@ -616,13 +616,10 @@ function styleOf(f){
  return {color:'#ffffff',weight:1.6,fillColor:fillC,
   fillOpacity:anyVisible?(PATTERN[b]?.42:.40):.04,opacity:anyVisible?.95:.25};}
 const geo=L.geoJSON(GJ,{style:styleOf,onEachFeature:(f,l)=>{LAYERS.push(l);
- const b=f.properties.full, owners=OWN[b]||[], m=MET[b]||{};
+ const b=f.properties.full, owners=OWN[b]||[];
  const chips=owners.map(o=>`<span class="own" style="background:${PERS[o].c}">${o}</span>`).join('');
  l.bindPopup(()=>`<div class="pp"><b>${b}</b><br/>${chips}
-  <table><tr><td>Eczane</td><td><b>${m.ecz??'-'}</b></td></tr>
-  <tr><td>Probiyotik Pazar</td><td><b>${(m.prob??0).toLocaleString('tr')}</b></td></tr>
-  <tr><td>Caps Pazar</td><td><b>${(m.caps??0).toLocaleString('tr')}</b></td></tr>
-  <tr><td>Sıvı Pazar</td><td><b>${(m.sivi??0).toLocaleString('tr')}</b></td></tr></table>${nbHtml(b)}</div>`,{maxWidth:260,autoPanPaddingTopLeft:[10,60]});
+  ${nbHtml(b)}</div>`,{maxWidth:260,autoPanPaddingTopLeft:[10,60]});
  l.on('mouseover',()=>l.setStyle({weight:3}));
  l.on('mouseout',()=>l.setStyle({weight:1.6}));
 }}).addTo(map);
@@ -694,7 +691,7 @@ function render(){pl.innerHTML='';const q=sn(Q.trim());
   const cnt=duty.reduce((a,b)=>a+nbList(b).length,0);
   const hd=document.createElement('div');hd.className='per'+(hidden.has(p)?' off':'');
   hd.innerHTML=`<span class="chip" style="background:${PERS[p].c}"></span><span class="nm">${p}</span>
-   <span class="ct">${PERS[p].n} brick • ${PERS[p].e.toLocaleString('tr')} ecz<br/>prob: ${(PERS[p].p/1e6).toFixed(1)}M</span>
+   <span class="ct">${PERS[p].n} brick</span>
    <span class="nbc${cnt?'':' z'}" title="Bugün nöbetçi">${cnt}</span><button class="eye" title="Haritada göster/gizle">👁</button>`;
   hd.onclick=()=>{openP.has(p)?openP.delete(p):openP.add(p);render();};
   hd.querySelector('.eye').onclick=e=>{e.stopPropagation();hidden.has(p)?hidden.delete(p):hidden.add(p);geo.setStyle(styleOf);updBadges();render();};
