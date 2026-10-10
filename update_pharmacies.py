@@ -448,17 +448,28 @@ def match_bricks(rows, ph_items, groups, rules):
 
 
 # ----------------------------------------------------------------- HTML YAZMA
-DATA_RE = re.compile(r'<script id="nobet-data">.*?</script>\s*', re.S)
-LEGACY_RE = re.compile(r"\n?/\* NOBET:START \*/.*?/\* NOBET:END \*/", re.S)
+# Etiketin hemen ardından NOBET:START, kapanıştan hemen önce NOBET:END gelmek ZORUNDA.
+# (Sadece etiket metnine bakmak, başka yerde geçen aynı metni de yakalayıp kodu silebilirdi.)
+DATA_RE = re.compile(
+    r'<script id="nobet-data">\s*/\* NOBET:START \*/(?:(?!</script>).)*?/\* NOBET:END \*/\s*</script>\s*',
+    re.S)
+LEGACY_RE = re.compile(r"\n?/\* NOBET:START \*/(?:(?!</script>).)*?/\* NOBET:END \*/", re.S)
 
 
 def clean_html(html: str) -> str:
     """Eski (bozuk) satır içi NOBET bloklarını ve eski veri script'ini temizle."""
-    html = DATA_RE.sub("", html)
-    return LEGACY_RE.sub("", html)
+    for rx in (DATA_RE, LEGACY_RE):
+        for m in rx.finditer(html):
+            blk = m.group(0)
+            if len(blk) > 600_000 or "BRANS" in blk or "function" in blk:
+                raise SystemExit("HATA: temizlenecek blok beklenenden büyük/şüpheli; dosya DEĞİŞTİRİLMEDİ.")
+        html = rx.sub("", html)
+    return html
 
 
 def inject(html: str, payload: dict) -> str:
+    n_before = html.count("</script>")
+    had_block = bool(DATA_RE.search(html))
     html = clean_html(html)
     m = PH_RE.search(html)
     if not m:
@@ -469,7 +480,12 @@ def inject(html: str, payload: dict) -> str:
     js = json.dumps(payload, ensure_ascii=False, indent=1, sort_keys=True).replace("</", "<\\/")
     block = ('<script id="nobet-data">\n/* NOBET:START */\n'
              f"const NOBET = {js};\n/* NOBET:END */\n</script>\n")
-    return html[:pos] + block + html[pos:]
+    out = html[:pos] + block + html[pos:]
+    # Güvenlik: </script> sayısı korunmalı (eski blok varsa aynı, yoksa +1) ve uygulama kodu eksilmemeli.
+    expected = n_before if had_block else n_before + 1
+    if out.count("</script>") != expected or not PH_RE.search(out):
+        raise SystemExit("HATA: çıktı doğrulaması başarısız; index.html DEĞİŞTİRİLMEDİ.")
+    return out
 
 
 def main():

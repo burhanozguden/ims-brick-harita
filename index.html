@@ -638,4 +638,187 @@ document.getElementById('s3').textContent=DOCS.length.toLocaleString('tr');
 document.getElementById('s4').textContent=HOSP.length;
 const R=document.documentElement.style;
 
-// —— NÖBETÇİ ECZANE ENTEGRASYONU (veri: ayrı </body></html>
+// —— NÖBETÇİ ECZANE ENTEGRASYONU (veri: sayfa başındaki ayrı "nobet-data" script bloğundaki NOBET) ——
+const NB=(typeof NOBET!=='undefined'&&NOBET&&NOBET.bricks)?NOBET:{date:'',total:0,matched:0,bricks:{}};
+const nbNorm=s=>(s||'').replace(/[İIı]/g,'i').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9 ]+/g,' ').replace(/\s+/g,' ').trim();
+const NB_STOP=new Set(['eczanesi','eczane','ecz','nobetci','ve']);
+const nbKey=s=>nbNorm(s).split(' ').filter(t=>t&&!NB_STOP.has(t)).join(' ');
+const nbList=b=>NB.bricks[b]||[];
+const nbIs=(b,name)=>{const k=nbKey(name);return !!k&&nbList(b).some(n=>n.key===k)};
+const nbDate=NB.date?NB.date.split('-').reverse().join('.'):'';
+const nbTotal=Object.values(NB.bricks).reduce((a,v)=>a+v.length,0);
+const nbBrickCount=ALLB.filter(b=>nbList(b).length).length;
+const nbPhone=t=>{const d=String(t||'').replace(/\D/g,'');return d.length===11?`${d.slice(0,4)} ${d.slice(4,7)} ${d.slice(7,9)} ${d.slice(9)}`:String(t||'')};
+const eM={};
+(function(){const el=document.getElementById('nb-info');
+ if(!nbTotal){el.style.display='none';return;}
+ const today=new Date().toLocaleDateString('sv-SE',{timeZone:'Europe/Istanbul'});
+ el.style.display='block';
+ if(NB.date===today){el.innerHTML=`🔴 <b>${nbDate}</b> nöbetçi eczaneler: <b>${nbTotal}</b> eczane • <b>${nbBrickCount}</b> brick`;}
+ else{el.classList.add('old');el.innerHTML=`⚠️ Nöbetçi verisi <b>${nbDate}</b> tarihli (bugünün listesi henüz yüklenmedi) • <b>${nbTotal}</b> eczane`;}
+})();
+function nbApplyFilter(){const on=document.getElementById('f-nb').checked;
+ ALLB.forEach(b=>{const has=nbList(b).length>0;
+  (LY[b]||[]).forEach(l=>l.setStyle({opacity:on&&!has?.12:1}));
+  const m=eM[b]; if(m){ if(on&&!has)eG.removeLayer(m); else if(!eG.hasLayer(m))eG.addLayer(m); }});
+ drawBr();}
+
+const map=L.map('map',{zoomControl:true,zoomSnap:.25,wheelPxPerZoomLevel:90}).setView([39.93,32.80],11);
+map.zoomControl.setPosition('bottomright');
+L.control.scale({imperial:false,position:'bottomleft'}).addTo(map);
+const sat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:21,attribution:'Esri'});
+const ref=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:21,pane:'shadowPane'});
+const osm=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxNativeZoom:19,maxZoom:21,detectRetina:true,attribution:'© OSM'});
+sat.addTo(map);
+
+// —— SINIRLAR: dolgusuz, çift çizgi ——
+const LY={}; let SEL=null;
+function wCase(){const z=map.getZoom();return z<10?3:z<12?4:5}
+function wLine(){const z=map.getZoom();return z<10?1.4:z<12?2:2.6}
+const casing=L.geoJSON(GJ,{interactive:false,style:{color:'rgba(6,10,18,.85)',weight:4,fill:false}}).addTo(map);
+const geo=L.geoJSON(GJ,{style:f=>({color:LC[f.properties.full],weight:wLine(),fill:true,fillOpacity:0}),
+ onEachFeature:(f,l)=>{const b=f.properties.full;(LY[b]=LY[b]||[]).push(l);
+  l.on('click',()=>pick(b,false));
+  l.on('mouseover',()=>{if(SEL!==b)l.setStyle({weight:wLine()+1.6})});
+  l.on('mouseout',()=>{if(SEL!==b)l.setStyle({weight:wLine()})});
+}}).addTo(map);
+function restyle(){casing.setStyle({weight:wCase()});
+ geo.eachLayer(l=>l.setStyle({weight:SEL===l.feature.properties.full?wLine()+2.6:wLine()}));}
+
+// —— KATMAN GRUPLARI: etiket / E / 🩺 (aç-kapa = ekle/çıkar) ——
+const labG=L.layerGroup(), eG=L.layerGroup(), hG=L.layerGroup();
+for(const b of ALLB){ if(!CENT[b])continue;
+ const big=META[b].dist===1;
+ const m=L.marker([CENT[b][1],CENT[b][0]],{interactive:true,
+  icon:L.divIcon({className:'blab4'+(big?' big':''),html:b.replace('ANKARA ','').replace('ANK ',''),iconSize:null})});
+ m.on('click',()=>pick(b,false)); labG.addLayer(m);}
+for(const b of ALLB){ if(!CENT[b]||!PH[b])continue;
+ const nn=nbList(b).length;
+ const m=L.marker([CENT[b][1]-0.0028,CENT[b][0]],{icon:L.divIcon({className:'eicon4'+(nn?' nb':''),html:nn?String(nn):'E',iconSize:[14,14]})});
+ m.bindPopup(`<div class="pp"><b>${b}</b><br/>${PH[b].length} eczane<span class="tag">${META[b].g}</span>${nn?`<br/><span class="tag nbtag">🔴 bugün ${nn} nöbetçi</span>`:''}<br/><button onclick="window.__pb('${b}')">Eczane listesini aç</button></div>`);
+ eG.addLayer(m); eM[b]=m;}
+HOSP.forEach(h=>{ if(h.lat==null)return;
+ const m=L.marker([h.lat,h.lon],{icon:L.divIcon({className:'hicon4'+(h.ap?' ap':''),html:'🩺',iconSize:[16,16]})});
+ m.bindPopup(`<div class="pp"><b>${h.n}</b><br/>${h.dr} doktor kaydı${h.ap?' • <i>yaklaşık konum</i>':''}<span class="tag">${h.b}</span><br/><button onclick="window.__ph(${h.i})">Doktorlarını listele</button></div>`);
+ hG.addLayer(m);});
+labG.addTo(map); eG.addTo(map); hG.addTo(map);
+window.__pb=b=>pick(b,true);
+window.__ph=i=>{document.querySelector('[data-p="p-dr"]').click();
+ document.getElementById('f-hosp').value=String(i);drFilter(true);};
+
+// —— HARİTA İÇİ KONTROLLER: altlık + katman aç/kapa ——
+function mkCtl(pos,defs){const C=L.Control.extend({onAdd(){
+ const d=L.DomUtil.create('div','mctl');
+ L.DomEvent.disableClickPropagation(d);L.DomEvent.disableScrollPropagation(d);
+ defs.forEach(([label,on,fn])=>{const btn=L.DomUtil.create('button','',d);
+  btn.innerHTML=label; if(on)btn.classList.add('on');
+  btn.onclick=()=>fn(btn);});
+ return d;}});
+ return new C({position:pos}).addTo(map);}
+let baseBtns=[];
+mkCtl('topright',[
+ ['Uydu',true,b=>setBase('sat',b)],['Hibrit',false,b=>setBase('hyb',b)],['Sokak',false,b=>setBase('osm',b)]]);
+baseBtns=document.querySelectorAll('.mctl')[0].querySelectorAll('button');
+function setBase(m,btn){[sat,ref,osm].forEach(l=>map.removeLayer(l));
+ if(m==='sat')sat.addTo(map); if(m==='hyb'){sat.addTo(map);ref.addTo(map);} if(m==='osm')osm.addTo(map);
+ baseBtns.forEach(x=>x.classList.remove('on'));btn.classList.add('on');}
+mkCtl('topright',[
+ ['Etiket',true,b=>{b.classList.toggle('on');map.hasLayer(labG)?map.removeLayer(labG):map.addLayer(labG);}],
+ ['<span style="color:#f87171;font-weight:800">E</span> Eczane',true,b=>{b.classList.toggle('on');map.hasLayer(eG)?map.removeLayer(eG):map.addLayer(eG);}],
+ ['🩺 Hastane',true,b=>{b.classList.toggle('on');map.hasLayer(hG)?map.removeLayer(hG):map.addLayer(hG);}]]);
+
+// —— ZOOM'A DUYARLI BOYUTLAR (CSS değişkenleriyle) ——
+function scale(){const z=map.getZoom();
+ R.setProperty('--lfs',(z<9.5?7:z<11?7.8:z<12.5?9.2:z<14?11:13)+'px');
+ R.setProperty('--lvis',z<10.2?'hidden':'visible');
+ R.setProperty('--lvisb','visible');
+ R.setProperty('--es',z<9.3?0:z<10?.6:z<12?.85:1.15);
+ R.setProperty('--hs',z<10?0:z<12?.85:1.2);
+ restyle();}
+map.on('zoomend',scale);
+
+// —— PANELLER ——
+const grpSel=document.getElementById('f-grp');
+[...new Set(ALLB.map(b=>META[b].g))].sort().forEach(g=>grpSel.add(new Option(g,g)));
+const lst=document.getElementById('lst');
+function drawBr(){
+ const q=(document.getElementById('q-br').value||'').toLocaleUpperCase('tr');
+ const g=grpSel.value, onlyNb=document.getElementById('f-nb').checked; lst.innerHTML='';
+ ALLB.forEach(b=>{ if(g&&META[b].g!==g)return; if(onlyNb&&!nbList(b).length)return;
+  let hit=!q||b.toLocaleUpperCase('tr').includes(q),sub='';
+  if(!hit&&q.length>=3){const f=(PH[b]||[]).find(p=>p.toLocaleUpperCase('tr').includes(q));if(f){hit=true;sub=f}}
+  if(!hit)return;
+  const d=document.createElement('div');d.className='row'+(SEL===b?' sel':'');
+  d.innerHTML=`<span class="sw" style="background:${LC[b]}"></span><span class="nm">${b}${sub?`<div style="font-weight:500;font-size:9px;color:var(--acc)">→ ${sub}</div>`:''}</span>${nbList(b).length?`<span class="nbc" title="Bugün nöbetçi">${nbList(b).length}</span>`:''}<span class="ct"><span><b>${META[b].e}</b>e</span><span><b>${META[b].d}</b>d</span></span>`;
+  d.onclick=()=>pick(b,true); lst.appendChild(d);});
+}
+document.getElementById('q-br').oninput=drawBr; grpSel.onchange=drawBr; document.getElementById('f-nb').onchange=nbApplyFilter;
+const fB=document.getElementById('f-brans'),fH=document.getElementById('f-hosp'),fK=document.getElementById('f-brick');
+BRANS.forEach((b,i)=>fB.add(new Option(b,i)));
+HOSP.forEach(h=>fH.add(new Option(h.n.length>44?h.n.slice(0,44)+'…':h.n,h.i)));
+ALLB.forEach(b=>fK.add(new Option(b,b)));
+const dlst=document.getElementById('dlst'),more=document.getElementById('more');
+let LIM=120;
+function drFilter(reset){ if(reset)LIM=120;
+ const q=(document.getElementById('q-dr').value||'').toLocaleUpperCase('tr');
+ const vb=fB.value,vh=fH.value,vk=fK.value; let out=[],n=0;
+ for(const[bIdx,hIdx,name]of DOCS){
+  if(vb&&bIdx!=vb)continue; if(vh&&hIdx!=vh)continue;
+  if(vk&&HOSP[hIdx].b!==vk)continue;
+  if(q&&!name.toLocaleUpperCase('tr').includes(q))continue;
+  n++; if(out.length<LIM)out.push([bIdx,hIdx,name]);}
+ dlst.innerHTML='';
+ out.forEach(([bI,hI,nm])=>{const d=document.createElement('div');d.className='drow';
+  d.innerHTML=`<div class="dn">${nm}</div><div class="dm"><i>${BRANS[bI]}</i> • ${HOSP[hI].n}<br/>Brick: ${HOSP[hI].b}</div>`;
+  d.onclick=()=>{const h=HOSP[hI];if(h.lat!=null)map.flyTo([h.lat,h.lon],14.5,{duration:.8});pick(h.b,false);};
+  dlst.appendChild(d);});
+ more.style.display=n>LIM?'block':'none';
+ more.textContent=`Daha fazla göster (${(n-LIM).toLocaleString('tr')} kayıt)`;}
+document.getElementById('q-dr').oninput=()=>drFilter(true);
+[fB,fH,fK].forEach(s=>s.onchange=()=>drFilter(true));
+more.onclick=()=>{LIM+=200;drFilter(false)};
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+ document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));t.classList.add('on');
+ document.querySelectorAll('.pane').forEach(p=>p.classList.remove('on'));
+ document.getElementById(t.dataset.p).classList.add('on');});
+const dt=document.getElementById('dt');let dtTab='e',dtB=null;
+document.getElementById('dt-x').onclick=()=>{dt.classList.remove('on');SEL=null;restyle();drawBr();};
+document.querySelectorAll('.dtt').forEach(t=>t.onclick=()=>{
+ document.querySelectorAll('.dtt').forEach(x=>x.classList.remove('on'));t.classList.add('on');
+ dtTab=t.dataset.t;dtBody();});
+function pick(b,zoom){SEL=b;restyle();
+ if(LY[b]&&zoom){let bd=null;LY[b].forEach(l=>{bd=bd?bd.extend(l.getBounds()):L.latLngBounds(l.getBounds().getSouthWest(),l.getBounds().getNorthEast())});
+  map.flyToBounds(bd.pad(.22),{duration:.8});}
+ dtB=b;
+ document.getElementById('dt-dot').style.background=LC[b];
+ document.getElementById('dt-t').childNodes[0].textContent=b;
+ document.getElementById('dt-m').textContent=`${META[b].g} • ${META[b].e} eczane • ${META[b].d} doktor`+(nbList(b).length?` • 🔴 ${nbList(b).length} nöbetçi`:'');
+ document.getElementById('dt-ce').textContent=`(${META[b].e})`;
+ document.getElementById('dt-cd').textContent=`(${META[b].d})`;
+ dt.classList.add('on');dtBody();drawBr();}
+function dtBody(){const el=document.getElementById('dt-body');el.innerHTML='';const b=dtB;if(!b)return;
+ if(dtTab==='e'){
+  const nl=nbList(b);
+  if(nl.length){const bx=document.createElement('div');bx.className='nbbox';
+   const h=document.createElement('h4');h.textContent=`🔴 Bugün nöbetçi${nbDate?' ('+nbDate+')':''} — ${nl.length} eczane`;bx.appendChild(h);
+   nl.forEach(n=>{const it=document.createElement('div');it.className='nbitem';
+    const nm=document.createElement('b');nm.textContent=(n.name||'').replace(/\s+/g,' ').trim();it.appendChild(nm);
+    if(n.address){const ad=document.createElement('small');ad.textContent=n.address;it.appendChild(ad);}
+    if(n.phone){const ph=document.createElement('small');const a=document.createElement('a');
+     a.href='tel:'+String(n.phone).replace(/[^\d+]/g,'');a.textContent='📞 '+nbPhone(n.phone);ph.appendChild(a);it.appendChild(ph);}
+    bx.appendChild(it);});
+   el.appendChild(bx);}
+  const ol=document.createElement('ol');
+  [...(PH[b]||[])].sort((a,c)=>Number(nbIs(b,c))-Number(nbIs(b,a))).forEach(p=>{const li=document.createElement('li');li.textContent=p;
+   if(nbIs(b,p)){li.className='nb';const t=document.createElement('span');t.className='nbbadge';t.textContent='NÖBETÇİ';li.appendChild(t);}
+   ol.appendChild(li)});
+  el.appendChild(ol);}
+ else{const byH={};DOCS.forEach(([bI,hI,nm])=>{if(HOSP[hI].b===b)(byH[hI]=byH[hI]||[]).push([bI,nm])});
+  const ks=Object.keys(byH);
+  if(!ks.length){el.innerHTML='<p style="color:var(--tx2)">Bu brick için doktor kaydı yok.</p>';return;}
+  ks.sort((a,c)=>byH[c].length-byH[a].length).forEach(hI=>{
+   const h4=document.createElement('h4');h4.textContent=`${HOSP[hI].n} (${byH[hI].length})`;el.appendChild(h4);
+   const ol=document.createElement('ol');byH[hI].forEach(([bI,nm])=>{const li=document.createElement('li');li.textContent=`${nm} — ${BRANS[bI]}`;ol.appendChild(li)});
+   el.appendChild(ol);});}}
+drawBr();drFilter(true);scale();
+</script></body></html>
