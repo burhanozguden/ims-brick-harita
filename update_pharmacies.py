@@ -20,14 +20,16 @@ Kullanım:
 """
 import argparse
 import json
+import os
 import re
 import sys
+import time
 import unicodedata
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-URL = "https://www.aeo.org.tr/nobetci-eczaneler"
+URL = os.environ.get("AEO_URL", "https://www.aeo.org.tr/nobetci-eczaneler")
 TZ = ZoneInfo("Europe/Istanbul")
 ROOT = Path(__file__).resolve().parent
 HTML_FILE = ROOT / "index.html"
@@ -203,64 +205,100 @@ def rows_from_dom(html):
     return rows
 
 
-def scrape(date_iso: str):
+BLOCK_HINTS = ("cloudflare", "access denied", "captcha", "are you a robot", "just a moment",
+               "erişim engellendi", "forbidden", "request blocked")
+ATTEMPTS = 3
+
+
+def _scrape_once(date_iso: str):
     from playwright.sync_api import sync_playwright
 
     DEBUG_DIR.mkdir(exist_ok=True)
     json_payloads, fragments, net_log = [], [], []
+    html, body_text, status = "", "", None
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        ctx = browser.new_context(
-            locale="tr-TR", timezone_id="Europe/Istanbul",
-            user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"),
-        )
-        page = ctx.new_page()
-
-        def on_response(resp):
-            try:
-                ct = resp.headers.get("content-type", "")
-                net_log.append({"url": resp.url, "status": resp.status, "type": ct})
-                if "json" in ct:
-                    json_payloads.append(resp.json())
-                elif "html" in ct and resp.url.rstrip("/") != URL.rstrip("/") \
-                        and "aeo.org.tr" in resp.url:
-                    fragments.append(resp.text())
-            except Exception:
-                pass
-
-        page.on("response", on_response)
-        page.goto(URL, wait_until="networkidle", timeout=60_000)
-
-        if date_iso:
-            try:
-                page.locator("input[type=date], input[name*=arih i], input[id*=arih i]") \
-                    .first.fill(date_iso, timeout=3000)
-            except Exception:
-                pass
-
         try:
-            page.get_by_role("button", name=re.compile(r"^\s*Ara\s*$", re.I)).first \
-                .click(timeout=5000)
-        except Exception:
+            ctx = browser.new_context(
+                locale="tr-TR", timezone_id="Europe/Istanbul",
+                user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                            "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"),
+            )
+            page = ctx.new_page()
+
+            def on_response(resp):
+                try:
+                    ct = resp.headers.get("content-type", "")
+                    net_log.append({"url": resp.url, "status": resp.status, "type": ct})
+                    if "json" in ct:
+                        json_payloads.append(resp.json())
+                    elif "html" in ct and resp.url.rstrip("/") != URL.rstrip("/") \
+                            and "aeo.org.tr" in resp.url:
+                        fragments.append(resp.text())
+                except Exception:
+                    pass
+
+            page.on("response", on_response)
             try:
-                page.locator("text=/^\\s*Ara\\s*$/i").first.click(timeout=5000)
+                # "networkidle" sürekli istek atan sayfalarda hiç gelmez -> önce domcontentloaded
+                resp = page.goto(URL, wait_until="domcontentloaded", timeout=45_000)
+                status = resp.status if resp else None
+            except Exception as e:
+                print(f"[scrape] sayfa açılamadı: {type(e).__name__}: "
+                      f"{str(e).splitlines()[0][:160]}")
+            try:
+                page.wait_for_load_state("networkidle", timeout=15_000)
             except Exception:
                 pass
-        try:
-            page.wait_for_load_state("networkidle", timeout=20_000)
-        except Exception:
-            pass
-        page.wait_for_timeout(2500)
 
-        html = page.content()
-        (DEBUG_DIR / "page.html").write_text(html, encoding="utf-8")
-        page.screenshot(path=str(DEBUG_DIR / "screenshot.png"), full_page=True)
-        browser.close()
+            if date_iso:
+                try:
+                    page.locator("input[type=date], input[name*=arih i], input[id*=arih i]") \
+                        .first.fill(date_iso, timeout=3000)
+                except Exception:
+                    pass
+            try:
+                page.get_by_role("button", name=re.compile(r"^\s*Ara\s*$", re.I)).first \
+                    .click(timeout=5000)
+            except Exception:
+                try:
+                    page.locator("text=/^\\s*Ara\\s*$/i").first.click(timeout=5000)
+                except Exception:
+                    pass
+            try:
+                page.wait_for_load_state("networkidle", timeout=20_000)
+            except Exception:
+                pass
+            page.wait_for_timeout(2500)
+
+            try:
+                html = page.content()
+                body_text = page.inner_text("body")
+            except Exception:
+                pass
+        finally:
+            # Hata olsa bile debug çıktısını mutlaka bırak
+            try:
+                (DEBUG_DIR / "page.html").write_text(html, encoding="utf-8")
+                page.screenshot(path=str(DEBUG_DIR / "screenshot.png"), full_page=True)
+            except Exception:
+                pass
+            browser.close()
 
     (DEBUG_DIR / "network.json").write_text(
         json.dumps(net_log, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    print(f"[scrape] http={status} json={len(json_payloads)} parça={len(fragments)} "
+          f"sayfa_metni={len(body_text)} karakter")
+    if status and status >= 400:
+        print(f"[scrape] UYARI: site HTTP {status} döndü. 403/429 ise erişim engeli olabilir "
+              f"(GitHub Actions ABD IP'si kullanır; Türkiye'den çalıştırmayı deneyin).")
+    low = body_text.lower()
+    if any(h in low for h in BLOCK_HINTS):
+        print("[scrape] UYARI: sayfa bot/erişim engeli sayfasına benziyor.")
+    if len(body_text) < 300:
+        print(f"[scrape] UYARI: sayfa neredeyse boş. Başı: {body_text[:150]!r}")
 
     rows = rows_from_json(json_payloads)
     source = "json"
@@ -282,6 +320,27 @@ def scrape(date_iso: str):
             out.append(r)
     print(f"[scrape] kaynak={source} kayıt={len(out)}")
     return out
+
+
+def scrape(date_iso: str):
+    """Geçici arızalara karşı birkaç kez dener; yeterli kayıt gelen ilk sonucu döndürür."""
+    best = []
+    for attempt in range(1, ATTEMPTS + 1):
+        print(f"[scrape] deneme {attempt}/{ATTEMPTS} -> {URL}")
+        try:
+            rows = _scrape_once(date_iso)
+        except Exception as e:
+            print(f"[scrape] hata: {type(e).__name__}: {str(e).splitlines()[0][:200]}")
+            rows = []
+        if len(rows) >= MIN_EXPECTED:
+            return rows
+        if len(rows) > len(best):
+            best = rows
+        if attempt < ATTEMPTS:
+            wait = 15 * attempt
+            print(f"[scrape] yeterli kayıt yok ({len(rows)}); {wait} sn sonra tekrar denenecek")
+            time.sleep(wait)
+    return best
 
 
 # ----------------------------------------------------------------- PH VERİSİ
@@ -429,7 +488,10 @@ def main():
     rows = [r for r in rows if is_ankara(r)]
     if len(rows) < MIN_EXPECTED:
         print(f"HATA: yalnızca {len(rows)} Ankara kaydı bulundu (min {MIN_EXPECTED}). "
-              f"index.html'e dokunulmadı. debug/ klasörüne bakın.", file=sys.stderr)
+              f"index.html'e dokunulmadı.\n"
+              f"  -> debug/screenshot.png ve debug/page.html dosyalarına bakın "
+              f"(sayfa gerçekte ne gösteriyor?).\n"
+              f"  -> debug/network.json: site veriyi hangi adresten çekiyor?", file=sys.stderr)
         sys.exit(1)
 
     html = clean_html(HTML_FILE.read_text(encoding="utf-8"))
