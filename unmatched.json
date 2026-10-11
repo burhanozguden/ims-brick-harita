@@ -1,5 +1,5 @@
 {
- "date": "2026-10-10",
+ "date": "2026-10-11",
  "items": [
   {
    "name": "MELEK ECZANESİ",
@@ -13,6 +13,16 @@
     "ANK GUNEY ILCELER",
     "ANK KARSIYAKA+IVEDIK",
     "ANK SOLFASOL+PURSAKLAR"
+   ]
+  },
+  {
+   "name": "TEMELLİ PINAR ECZANESİ",
+   "district": "Sincan",
+   "address": "TEMELLİ-İstiklal Mah. Hürriyet Cad. No:30/A Temelli/ Sincan Gece Saat 21:00'e Kadar Açıktır.",
+   "phone": "05069267388",
+   "reason": "district-mismatch",
+   "candidates": [
+    "ANK POLATLI -2"
    ]
   }
  ]
