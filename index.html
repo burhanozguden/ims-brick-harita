@@ -101,6 +101,10 @@ html,body,#map{margin:0;height:100%;font-family:'Inter',system-ui,sans-serif;bac
  .leaflet-control-zoom,.leaflet-control-scale{display:none}
  .leaflet-popup-content{max-width:72vw}
 }
+.nbitem.hl{background:rgba(251,191,36,.2);border-color:#fbbf24;box-shadow:0 0 0 2px rgba(251,191,36,.35);animation:hlp 1s ease 2}
+@keyframes hlp{50%{box-shadow:0 0 0 7px rgba(251,191,36,.08)}}
+.per.phl{box-shadow:inset 3px 0 0 #fbbf24}.bt.hl{color:#fbbf24}
+.pk{cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px}
 </style></head><body>
 <div id="map"></div>
 <div id="lg">
@@ -800,8 +804,8 @@ const isM=()=>window.matchMedia('(max-width:700px)').matches;
 function setMin(v){lg.classList.toggle('min',v);lgx.textContent=v?(isM()?'▴':'▸'):'▾';}
 function nbHtml(b){const n=nbList(b);
  if(!n.length)return '<div style="margin-top:7px;color:#94a3b8">Bugün nöbetçi eczane yok.</div>';
- return `<div style="margin-top:8px;padding-top:6px;border-top:1px dashed rgba(148,163,184,.3)"><b style="color:#fca5a5">🔴 Bugün nöbetçi (${n.length})</b>`+
-  n.map(x=>`<div style="margin-top:4px"><b>${esc(cln(x.name))}</b>${x.phone?` <a href="tel:${esc(tel(x.phone))}" style="color:#38bdf8">${esc(nbPhone(x.phone))}</a>`:''}<br/><span style="color:#94a3b8;font-size:9.5px">${esc(cln(x.address))}</span>${x.note?`<br/><span style="color:#fbbf24;font-size:9.5px">ℹ️ ${esc(cln(x.note))}</span>`:''}${mapUrl(x)?`<br/><a href="${esc(mapUrl(x))}" target="_blank" rel="noopener" style="color:#38bdf8;font-size:10px">📍 Yol tarifi</a>`:''}</div>`).join('')+'</div>';}
+ return `<div style="margin-top:8px;padding-top:6px;border-top:1px dashed rgba(148,163,184,.3)"><b style="color:#fca5a5">🔴 Bugün nöbetçi (${n.length})</b> <span style="color:#94a3b8;font-size:9px">• isme dokun: kişi panelinde aç</span>`+
+  n.map((x,i)=>`<div style="margin-top:4px"><b class="pk" data-rv="1" data-b="${esc(b)}" data-i="${i}">${esc(cln(x.name))} ›</b>${x.phone?` <a href="tel:${esc(tel(x.phone))}" style="color:#38bdf8">${esc(nbPhone(x.phone))}</a>`:''}<br/><span style="color:#94a3b8;font-size:9.5px">${esc(cln(x.address))}</span>${x.note?`<br/><span style="color:#fbbf24;font-size:9.5px">ℹ️ ${esc(cln(x.note))}</span>`:''}${mapUrl(x)?`<br/><a href="${esc(mapUrl(x))}" target="_blank" rel="noopener" style="color:#38bdf8;font-size:10px">📍 Yol tarifi</a>`:''}</div>`).join('')+'</div>';}
 
 const OWNED={}; for(const b in OWN)OWN[b].forEach(p=>(OWNED[p]=OWNED[p]||[]).push(b));
 const BL={}; LAYERS.forEach(l=>{const b=l.feature.properties.full;(BL[b]=BL[b]||[]).push(l)});
@@ -815,7 +819,7 @@ function focusBrick(b){const ls=BL[b];if(!ls)return;if(isM())setMin(true);
 const nbG=L.layerGroup().addTo(map), badges={};
 for(const b in NB.bricks){if(!CENT[b]||!nbList(b).length)continue;
  const m=L.marker([CENT[b][1]-0.0028,CENT[b][0]],{icon:L.divIcon({className:'eicon4',html:String(nbList(b).length),iconSize:[14,14]})});
- m.on('click',()=>openB(b));badges[b]=m;nbG.addLayer(m);}
+ m.on('click',()=>reveal(b,null));badges[b]=m;nbG.addLayer(m);}
 function updBadges(){for(const b in badges){const vis=(OWN[b]||[]).some(o=>!hidden.has(o));
  if(vis)nbG.addLayer(badges[b]);else nbG.removeLayer(badges[b]);}}
 
@@ -837,22 +841,22 @@ function render(){pl.innerHTML='';const q=sn(Q.trim());
   const rows=duty.map(b=>({b,l:nbList(b).filter(x=>!q||sn(x.name).includes(q)||sn(short(b)).includes(q))})).filter(o=>o.l.length);
   if(q&&!rows.length)continue;
   const cnt=duty.reduce((a,b)=>a+nbList(b).length,0);
-  const hd=document.createElement('div');hd.className='per'+(hidden.has(p)?' off':'');
+  const hd=document.createElement('div');hd.className='per'+(hidden.has(p)?' off':'')+(HL&&OWN[HL.b].includes(p)?' phl':'');
   hd.innerHTML=`<span class="chip" style="background:${PERS[p].c}"></span><span class="nm">${p}</span>
    <span class="ct">${PERS[p].n} brick</span>
    <span class="nbc${cnt?'':' z'}" title="Bugün nöbetçi">${cnt}</span><button class="eye" title="Haritada göster/gizle">👁</button>`;
-  hd.onclick=()=>{openP.has(p)?openP.delete(p):openP.add(p);render();};
-  hd.querySelector('.eye').onclick=e=>{e.stopPropagation();hidden.has(p)?hidden.delete(p):hidden.add(p);geo.setStyle(styleOf);updBadges();render();};
+  hd.onclick=()=>{HL=null;openP.has(p)?openP.delete(p):openP.add(p);render();};
+  hd.querySelector('.eye').onclick=e=>{e.stopPropagation();HL=null;hidden.has(p)?hidden.delete(p):hidden.add(p);geo.setStyle(styleOf);updBadges();render();};
   pl.appendChild(hd);
   if(!(q||openP.has(p)))continue;
   const body=document.createElement('div');body.className='pb';
   if(!rows.length){body.innerHTML='<div class="none">Bugün bu kişinin bricklerinde nöbetçi eczane yok.</div>';}
   rows.forEach(({b,l})=>{
-   const t=document.createElement('div');t.className='bt';t.textContent=short(b);
+   const t=document.createElement('div');t.className='bt'+(HL&&HL.b===b?' hl':'');t.textContent=short(b);
    const oth=OWN[b].filter(o=>o!==p);
    if(oth.length){const i=document.createElement('i');i.textContent=' • ortak: '+oth.map(o=>o.split(' ')[0]).join(', ');t.appendChild(i);}
    t.onclick=()=>focusBrick(b);body.appendChild(t);
-   l.forEach(x=>{const it=document.createElement('div');it.className='nbitem';
+   l.forEach(x=>{const ix=nbList(b).indexOf(x),it=document.createElement('div');it.className='nbitem'+(HL&&HL.b===b&&(HL.i==null||HL.i===ix)?' hl':'');
     const nm=document.createElement('b');nm.textContent=cln(x.name);it.appendChild(nm);
     if(x.address){const s=document.createElement('small');s.textContent=cln(x.address);it.appendChild(s);}
     if(x.phone){const s=document.createElement('small'),a=document.createElement('a');a.href='tel:'+tel(x.phone);a.textContent='📞 '+nbPhone(x.phone);a.onclick=e=>e.stopPropagation();s.appendChild(a);it.appendChild(s);}
@@ -861,7 +865,18 @@ function render(){pl.innerHTML='';const q=sn(Q.trim());
     it.onclick=()=>focusBrick(b);body.appendChild(it);});});
   pl.appendChild(body);}
  if(q&&!pl.children.length)pl.innerHTML='<div class="none" style="padding:8px">Bu isimde nöbetçi eczane yok.</div>';}
-document.getElementById('q').oninput=e=>{Q=e.target.value;render();};
+let HL=null;
+function reveal(b,i){
+ if(!OWN[b])return;
+ HL={b,i:(i==null||isNaN(i))?null:i};Q='';document.getElementById('q').value='';
+ OWN[b].forEach(p=>openP.add(p));
+ setMin(false);if(isM()&&map.closePopup)map.closePopup();
+ render();
+ const t=pl.querySelector('.nbitem.hl')||pl.querySelector('.bt.hl');
+ if(t)t.scrollIntoView({block:'center',behavior:'smooth'});}
+document.addEventListener('click',e=>{const t=e.target.closest&&e.target.closest('[data-rv]');
+ if(t){e.preventDefault();reveal(t.dataset.b,parseInt(t.dataset.i,10));}},true);
+document.getElementById('q').oninput=e=>{HL=null;Q=e.target.value;render();};
 lgx.onclick=e=>{e.stopPropagation();setMin(!lg.classList.contains('min'));};
 document.getElementById('lgh').onclick=()=>{if(isM())setMin(!lg.classList.contains('min'));};
 render();
