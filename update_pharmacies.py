@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Ankara Eczacı Odası nöbetçi eczanelerini çeker, index.html içindeki PH
+Ankara Eczacı Odası nöbetçi eczanelerini çeker, ph.json içindeki PH
 (brick -> eczane adları) yapısına göre bricklere eşler ve NOBET verisini
 index.html'e AYRI bir <script id="nobet-data"> bloğu olarak yazar.
 
-NOT: PH ve diğer değişkenler tek bir "const GJ=..., PH=..., BRANS=..." zincirinde
-olduğu için PH'nin yanına kod eklemek JS'i bozar. Bu yüzden NOBET, ana script'ten
-ÖNCE gelen ayrı bir <script> bloğuna yazılır; PH'ye hiç dokunulmaz.
+NOT: Tüm eczane listesi (PH) sayfaya gömülmez, ph.json'da durur. Sayfada yalnızca günün
+nöbetçileri (NOBET) bulunur; ana script'ten ÖNCE gelen ayrı bir <script> bloğuna yazılır.
 
 Eşleştirme sırası:
   1) Nöbetçi eczane adı PH içinde BİREBİR (ECZANESİ ekini yok sayarak) geçiyorsa -> o brick
@@ -37,6 +36,7 @@ TZ = ZoneInfo("Europe/Istanbul")
 ROOT = Path(__file__).resolve().parent
 HTML_FILE = ROOT / "index.html"
 RULES_FILE = ROOT / "brick_rules.json"
+PH_FILE = ROOT / "ph.json"
 UNMATCHED_FILE = ROOT / "unmatched.json"
 DEBUG_DIR = ROOT / "debug"
 
@@ -315,92 +315,16 @@ def scrape(date_iso: str, fetcher: str = "auto"):
     return out
 
 
-# ----------------------------------------------------------------- JS NESNE OKUMA
-PH_RE = re.compile(r"\bPH\s*=\s*\{")
-META_RE = re.compile(r"\bMETA\s*=\s*\{")
-IDENT_KEY = re.compile(r"([A-Za-z_$][\w$]*)\s*:")
-
-
-def scan_object(src: str, start: int):
-    """src[start]=='{'. -> (kapanış '}' indeksi, [(key, value_start, value_end), ...])"""
-    n, i, depth = len(src), start, 0
-    entries, key, vstart = [], None, None
-
-    def close(pos):
-        nonlocal key, vstart
-        if key is not None:
-            entries.append((key, vstart, pos))
-            key, vstart = None, None
-
-    while i < n:
-        c = src[i]
-        if c in "\"'`":
-            j = i + 1
-            while j < n and src[j] != c:
-                j += 2 if src[j] == "\\" else 1
-            if depth == 1 and key is None:
-                k = j + 1
-                while k < n and src[k].isspace():
-                    k += 1
-                if k < n and src[k] == ":":
-                    key, vstart, i = src[i + 1:j], k + 1, k + 1
-                    continue
-            i = j + 1
-            continue
-        if src.startswith("//", i):
-            j = src.find("\n", i)
-            i = n if j < 0 else j
-            continue
-        if src.startswith("/*", i):
-            j = src.find("*/", i + 2)
-            i = n if j < 0 else j + 2
-            continue
-        if depth == 1 and key is None and (i == 0 or not (src[i - 1].isalnum() or src[i - 1] in "_$")):
-            m = IDENT_KEY.match(src, i)
-            if m:
-                key, vstart, i = m.group(1), m.end(), m.end()
-                continue
-        if c in "{[(":
-            depth += 1
-        elif c in "}])":
-            depth -= 1
-            if depth == 0:
-                close(i)
-                return i, entries
-        elif c == "," and depth == 1:
-            close(i)
-        i += 1
-    raise ValueError("JS nesnesinin kapanış parantezi bulunamadı")
-
-
-def load_ph(html: str) -> dict:
-    """PH -> {brick: [eczane adı, ...]}"""
-    m = PH_RE.search(html)
-    if not m:
-        raise SystemExit("HATA: index.html içinde 'PH = {' bulunamadı.")
-    _, entries = scan_object(html, m.end() - 1)
-    out = {}
-    for k, s, e in entries:
-        txt = html[s:e].strip()
-        try:
-            arr = json.loads(txt)
-        except Exception:
-            arr = re.findall(r'"((?:[^"\\]|\\.)*)"', txt)
-        out[k] = [a for a in arr if isinstance(a, str)]
-    return out
-
-
-def load_groups(html: str) -> dict:
-    """META -> {brick: normalize edilmiş grup adı}  (bulunamazsa boş)"""
-    m = META_RE.search(html)
-    if not m:
-        return {}
-    try:
-        end, _ = scan_object(html, m.end() - 1)
-        meta = json.loads(html[m.end() - 1:end + 1])
-        return {b: norm(v.get("g", "")) for b, v in meta.items()}
-    except Exception:
-        return {}
+# ----------------------------------------------------------------- PH VERİSİ
+def load_ph_file():
+    """ph.json -> (PH: {brick: [eczane adı]}, groups: {brick: normalize edilmiş grup adı})"""
+    if not PH_FILE.exists():
+        raise SystemExit(f"HATA: {PH_FILE.name} bulunamadı.")
+    d = json.loads(PH_FILE.read_text(encoding="utf-8"))
+    if "ph" not in d:
+        raise SystemExit(f"HATA: {PH_FILE.name} beklenen biçimde değil ('ph' anahtarı yok). "
+                         f"Bu dosya brick -> eczane adları listesini içermeli.")
+    return d["ph"], d.get("groups", {})
 
 
 # ----------------------------------------------------------------- EŞLEŞTİRME
@@ -438,21 +362,33 @@ def match_bricks(rows, ph_items, groups, rules):
     all_bricks = list(ph_items.keys())
     result, unmatched = {}, []
 
-    def compatible(b, dist_n):
+    GENERIC = {"ilceler", "guney", "kuzey", "dogu", "bati", "merkez"}
+
+    def compatible(b, dists, hay):
+        """Brick grubu ilçeyle uyumlu mu? API'deki ilçe VE adreste geçen ilçe dikkate alınır;
+        ayrıca adreste brick adındaki mahalle/semt geçiyorsa (ör. "(Eryaman)") uyumlu sayılır."""
         allowed = GROUP_DISTRICTS.get(groups.get(b, ""))
-        return allowed is None or not dist_n or dist_n in allowed
+        if allowed is None or not dists or dists & allowed:
+            return True
+        toks = [t for t in re.findall(r"[a-z0-9]+", norm(b)) if len(t) >= 5 and t not in GENERIC]
+        return any(f" {t} " in hay for t in toks)
 
     for r in rows:
         key = core_name(r["name"])
         dist_n = norm(r.get("district", ""))
         hay = f" {norm(r.get('address', '') + ' ' + r.get('district', ''))} "
+        dists = {d for d in (dist_n, norm(detect_district(r.get("address", "")))) if d}
         chosen, how, reason, cands_out = None, None, None, []
 
         # 1) PH içinde birebir ad eşleşmesi
         cands = sorted(idx.get(key, []))
         if cands:
-            pool = [b for b in cands if compatible(b, dist_n)] or cands
-            if len(pool) == 1:
+            pool = [b for b in cands if compatible(b, dists, hay)]
+            if not pool:
+                # Ad PH'de var ama hiçbir aday brick eczanenin ilçesiyle uyumlu değil:
+                # aynı isimli başka bir eczane olabilir -> sessizce atama, raporla.
+                reason, cands_out = "district-mismatch", cands
+            elif len(pool) == 1:
                 chosen, how = pool[0], "ph-name"
             else:
                 w = pick_unique(pool, hay, dist_n, rules, groups)
@@ -463,7 +399,7 @@ def match_bricks(rows, ph_items, groups, rules):
 
         # 2) PH'de yok -> kurallar / mahalle ipuçları
         if not chosen and not cands:
-            pool = [b for b in all_bricks if compatible(b, dist_n)] or all_bricks
+            pool = [b for b in all_bricks if compatible(b, dists, hay)] or all_bricks
             w = pick_unique(pool, hay, dist_n, rules, groups)
             if w:
                 chosen, how = w, "rule"
@@ -498,23 +434,23 @@ def clean_html(html: str) -> str:
     return html
 
 
+MAIN_SCRIPT = "<script>"  # özniteliksiz tek ana script; NOBET bloğu bunun ÖNÜNE konur
+
+
 def inject(html: str, payload: dict) -> str:
     n_before = html.count("</script>")
     had_block = bool(DATA_RE.search(html))
     html = clean_html(html)
-    m = PH_RE.search(html)
-    if not m:
-        raise SystemExit("HATA: PH bulunamadı.")
-    pos = html.rfind("<script", 0, m.start())
+    pos = html.rfind(MAIN_SCRIPT)
     if pos < 0:
-        raise SystemExit("HATA: PH'yi içeren <script> etiketi bulunamadı.")
+        raise SystemExit("HATA: ana <script> etiketi bulunamadı.")
     js = json.dumps(payload, ensure_ascii=False, indent=1, sort_keys=True).replace("</", "<\\/")
     block = ('<script id="nobet-data">\n/* NOBET:START */\n'
              f"const NOBET = {js};\n/* NOBET:END */\n</script>\n")
     out = html[:pos] + block + html[pos:]
-    # Güvenlik: </script> sayısı korunmalı (eski blok varsa aynı, yoksa +1) ve uygulama kodu eksilmemeli.
+    # Güvenlik: </script> sayısı korunmalı (eski blok varsa aynı, yoksa +1) ve ana kod eksilmemeli.
     expected = n_before if had_block else n_before + 1
-    if out.count("</script>") != expected or not PH_RE.search(out):
+    if out.count("</script>") != expected or MAIN_SCRIPT not in out:
         raise SystemExit("HATA: çıktı doğrulaması başarısız; index.html DEĞİŞTİRİLMEDİ.")
     return out
 
@@ -541,8 +477,7 @@ def main():
         sys.exit(1)
 
     html = clean_html(HTML_FILE.read_text(encoding="utf-8"))
-    ph_items = load_ph(html)
-    groups = load_groups(html)
+    ph_items, groups = load_ph_file()
     rules = json.loads(RULES_FILE.read_text(encoding="utf-8")) if RULES_FILE.exists() else {}
 
     by_brick, unmatched = match_bricks(rows, ph_items, groups, rules)

@@ -1,0 +1,54 @@
+name: Nöbetçi Eczaneleri Güncelle
+
+on:
+  schedule:
+    - cron: "0 3 * * *"        # 03:00 UTC = 06:00 Türkiye saati (UTC+3)
+    - cron: "30 6 * * *"       # 06:30 UTC = 09:30 TR: sabah çalışması başarısız olduysa ikinci şans
+  workflow_dispatch:            # Actions sekmesinden elle de çalıştırılabilir
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-map
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Kütüphaneleri kur
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Scraper'ı çalıştır
+        run: python update_pharmacies.py
+
+      - name: Hata ayıklama çıktılarını sakla
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug
+          path: debug/
+
+      - name: Değişiklik varsa commit & push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html unmatched.json
+          if git diff --cached --quiet; then
+            echo "Değişiklik yok."
+          else
+            git commit -m "chore: nöbetçi eczaneler $(TZ=Europe/Istanbul date +%F)"
+            git pull --rebase
+            git push
+          fi
