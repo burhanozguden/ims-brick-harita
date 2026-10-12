@@ -4,7 +4,7 @@ Ankara 2026 brick dağılımını (5 kişi, 83 brick) ve **günün nöbetçi ecz
 
 ## Dosyalar
 - `index.html` — harita ve panel (kişi → bricklerindeki nöbetçiler, arama, haritada rozetler)
-- `update_pharmacies.py` — nöbetçileri API'den çekip bricklere eşler, `index.html`'e yazar
+- `update_pharmacies.py` — nöbetçileri eczaneler.gen.tr'den çekip bricklere eşler, `index.html`'e yazar
 - `ph.json` — brick → tüm eczane adları + brick grupları (sadece Python okur, sayfaya gömülmez)
 - `brick_rules.json` — eşleşmeyenler için ipucu kuralları
 - `unmatched.json` — son çalıştırmada eşleşmeyen nöbetçiler (betik üretir)
@@ -13,10 +13,9 @@ Ankara 2026 brick dağılımını (5 kişi, 83 brick) ve **günün nöbetçi ecz
 Kişi–brick dağılımı `index.html` içindeki `OWN` / `PERS` verisindedir; kişi adı değiştirmek için ikisinde de değiştirin.
 
 ## Veri kaynağı
-1. **Ana kaynak — AEO:** `GET https://www.aeo.org.tr/getPharmacies/{YYYY-MM-DD}` (Ankara Eczacı Odası'nın kendi sayfasının kullandığı JSON API'si). Site Cloudflare arkasında olduğu için istek önce Playwright ile açılan oturumdan yapılır; olmazsa `curl_cffi` denenir. Ayrıntı: `aeo_api_findings.md`.
-2. **Yedek kaynak — eczaneler.gen.tr:** AEO'dan yeterli kayıt gelmezse `https://www.eczaneler.gen.tr/nobetci-ankara` sayfası okunur (düz HTTP → `curl_cffi` → tarayıcı sırasıyla). Sayfa dün/bugün/yarın için üç liste içerir; başlıklardaki tarihe göre istenen gün seçilir. Bu site resmi oda sitesi değil, listeleri derleyen üçüncü taraf bir portaldır (kendi kullanım koşullarında "Sitene Ekle" aracını önerir); bu yüzden yalnızca yedek olarak, günde en fazla birkaç istekle kullanılır. Yedek kullanıldığında sayfadaki bilgi satırında "kaynak: eczaneler.gen.tr" yazar. Bu kaynakta koordinat yoktur; yol tarifi bağlantısı adresten üretilir.
+**eczaneler.gen.tr** (`https://www.eczaneler.gen.tr/nobetci-ankara`) — varsayılan ve tek kaynak. Sayfa dün/bugün/yarın için üç liste içerir; başlıklardaki tarihe göre istenen gün seçilir. Sayfa düz HTTP ile okunur; olmazsa sırasıyla `curl_cffi` ve tarayıcı (Playwright) denenir. Bu site resmi oda sitesi değil, Ankara Eczacı Odası listelerini derleyen üçüncü taraf bir portaldır (kendi kullanım koşullarında "Sitene Ekle" aracını önerir); betik günde en fazla birkaç istek atar. Kayıtlarda koordinat yoktur; yol tarifi bağlantısı adresten üretilir. Sayfadaki bilgi satırında kaynak yazar.
 
-Kaynağı elle seçmek için: `--source aeo|eczaneler|auto` (varsayılan `auto`).
+Eski AEO API'si (`https://www.aeo.org.tr/getPharmacies/{tarih}`, Cloudflare arkasında) kodda duruyor ama varsayılan değil: `--source aeo` ya da `--source auto` (önce AEO, olmazsa eczaneler.gen.tr).
 
 ## Eşleştirme
 1. Eczane adı `ph.json` içinde birebir geçiyorsa o brick (aynı ad birden çok brickte varsa ilçe/mahalle ipuçlarıyla seçilir).
@@ -31,8 +30,8 @@ playwright install chromium
 python update_pharmacies.py                      # çek, index.html'i güncelle
 python update_pharmacies.py --dry-run            # yazmadan özet göster
 python update_pharmacies.py --date 2026-10-11    # belirli gün
-python update_pharmacies.py --source eczaneler   # yalnızca yedek kaynak
-python update_pharmacies.py --fetcher curl       # AEO için Playwright yerine curl_cffi
+python update_pharmacies.py --source auto        # önce AEO, olmazsa eczaneler.gen.tr
+python update_pharmacies.py --source aeo         # yalnızca AEO (Playwright/curl_cffi ile)
 python update_pharmacies.py --rows-json x.json   # scrape etmeden hazır liste (test)
 ```
 Veri 20 kayıttan azsa betik hata verir ve `index.html`'e dokunmaz; ayrıntı için `debug/` klasörüne bakın.

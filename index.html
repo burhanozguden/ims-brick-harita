@@ -830,7 +830,7 @@ function updBadges(){for(const b in badges){const vis=(OWN[b]||[]).some(o=>!hidd
  const NOBET_SAATI=9; // nöbet günü TR saatiyle bu saatte değişir; ondan önce hâlâ dünün listesi geçerli
  const today=new Date(Date.now()-NOBET_SAATI*3600e3).toLocaleDateString('sv-SE',{timeZone:'Europe/Istanbul'}), d=NB.date.split('-').reverse().join('.');
  el.style.display='block';
- if(NB.date>=today)el.innerHTML=`🔴 <b>${d}</b> nöbetçi eczaneler: <b>${tot}</b> eczane • <b>${nbr}</b> brick${NB.source==='eczaneler'?' • <span title="AEO erişilemediği için yedek kaynak kullanıldı">kaynak: eczaneler.gen.tr</span>':''}`;
+ if(NB.date>=today)el.innerHTML=`🔴 <b>${d}</b> nöbetçi eczaneler: <b>${tot}</b> eczane • <b>${nbr}</b> brick${NB.source==='eczaneler'?' • <span title="Veri kaynağı: eczaneler.gen.tr">kaynak: eczaneler.gen.tr</span>':''}`;
  else{el.classList.add('old');el.innerHTML=`⚠️ Nöbetçi verisi <b>${d}</b> tarihli (bugünün listesi henüz yüklenmedi) • <b>${tot}</b> eczane`;}})();
 
 // kişi kartları

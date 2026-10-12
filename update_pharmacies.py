@@ -24,10 +24,12 @@ Veri: https://www.aeo.org.tr/getPharmacies/{YYYY-MM-DD} JSON API'si (bkz. SCRAPI
 """
 import argparse
 import json
+import os
 import re
 import sys
 import unicodedata
-from datetime import datetime
+import urllib.request
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -284,7 +286,7 @@ def _fetch_with_curl_cffi(date_iso: str) -> str:
 FETCHERS = {"playwright": _fetch_with_playwright, "curl": _fetch_with_curl_cffi}
 
 
-def scrape(date_iso: str, fetcher: str = "auto"):
+def _scrape_aeo(date_iso: str, fetcher: str = "auto"):
     date_iso = date_iso or datetime.now(TZ).strftime("%Y-%m-%d")
     DEBUG_DIR.mkdir(exist_ok=True)
     order = ["playwright", "curl"] if fetcher == "auto" else [fetcher]
@@ -313,6 +315,233 @@ def scrape(date_iso: str, fetcher: str = "auto"):
             out.append(r)
     print(f"[scrape] tarih={date_iso} kaynak=api/{source} kayıt={len(out)}")
     return out
+
+
+# ----------------------------------------------------------------- YEDEK KAYNAK: eczaneler.gen.tr
+# Varsayılan veri kaynağı (AEO sitesi Cloudflare nedeniyle güvenilir çekilemediği için). Sayfa üç günlük liste içerir
+# (dün/bugün/yarın); her blok "12 Ekim P.tesi akşamından 13 Ekim ... sabahına kadar." gibi
+# bir başlıkla başlar. Başlıktaki tarih, istenen güne (date_iso) eşlenir.
+# NOT: Bu site Ankara Eczacı Odası'nın resmi sitesi değil, listeleri derleyen üçüncü taraf bir
+# portaldır (kullanım koşullarına bakınız); listeleri Ankara Eczacı Odası'ndan derler.
+GENTR_URL = os.environ.get("GENTR_URL", "https://www.eczaneler.gen.tr/nobetci-ankara")
+_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+_MONTHS = {"ocak": 1, "subat": 2, "mart": 3, "nisan": 4, "mayis": 5, "haziran": 6,
+           "temmuz": 7, "agustos": 8, "eylul": 9, "ekim": 10, "kasim": 11, "aralik": 12}
+_DATE_HEAD_RE = re.compile(r"^\s*(\d{1,2}) (" + "|".join(_MONTHS) + r")\b")
+_PHONE_PIECE_RE = re.compile(r"^\+?[\d\s()\-]{10,22}$")
+_PHONE_IN_TEXT_RE = re.compile(r"0?\s*\(\s*\d{3}\s*\)\s*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}")
+_ARROWS = "→»"
+_ELINK = 'a[href*="/eczane/ankara-"]'
+
+
+def _gentr_date(day: int, month: int, today: date) -> str:
+    best = min((date(y, month, day) for y in (today.year - 1, today.year, today.year + 1)),
+               key=lambda d: abs((d - today).days))
+    return best.isoformat()
+
+
+def _digits_to_phone(s: str) -> str:
+    d = re.sub(r"\D", "", s)
+    if len(d) == 12 and d.startswith("90"):
+        d = "0" + d[2:]
+    if len(d) == 10:
+        d = "0" + d
+    return d
+
+
+def _district_from_piece(piece: str) -> str:
+    n, best, found = norm(piece), "", ""
+    for name, canon in [(d, d) for d in DISTRICTS] + list(DISTRICT_ALIASES.items()):
+        if n.startswith(norm(name)) and len(name) > len(best):
+            best, found = name, canon
+    return found
+
+
+def _gentr_container(a):
+    """Bu eczane linkini (ve yalnızca onu) içeren en geniş ata öğe = eczane satırı/kartı."""
+    cur = a
+    while cur.parent is not None and getattr(cur.parent, "name", None) not in (None, "body", "html", "[document]"):
+        par = cur.parent
+        if len({x.get("href") for x in par.select(_ELINK)}) > 1:
+            break
+        cur = par
+    return cur
+
+
+def _gentr_row(a):
+    cont = _gentr_container(a)
+    name = _clean(a.get_text(" ", strip=True))
+    pieces = [_clean(s) for s in cont.stripped_strings]
+    pieces = [s for s in pieces if s]
+    if name in pieces:
+        pieces.remove(name)
+
+    # telefon
+    phone = ""
+    for i in range(len(pieces) - 1, -1, -1):
+        if _PHONE_PIECE_RE.match(pieces[i]):
+            phone = _digits_to_phone(pieces.pop(i))
+            break
+    if not phone:
+        for i, s in enumerate(pieces):
+            m = _PHONE_IN_TEXT_RE.search(s)
+            if m:
+                phone = _digits_to_phone(m.group(0))
+                pieces[i] = _clean(s.replace(m.group(0), ""))
+                break
+        pieces = [s for s in pieces if s]
+
+    # sondaki "İlçe [Mahalle]" parçalarını ayır
+    def short(s):
+        return len(s) <= 28 and not re.search(r"\d", s) and s[0] not in _ARROWS
+
+    def dlike(s):
+        return short(s) and bool(_district_from_piece(s))
+
+    tail, i = [], len(pieces)
+    while i > 1:
+        s = pieces[i - 1]
+        if dlike(s):
+            tail.insert(0, s)
+            i -= 1
+            break
+        if short(s) and any(dlike(q) for q in pieces[max(0, i - 3):i - 1]):
+            tail.insert(0, s)
+            i -= 1
+            continue
+        break
+    main_txt = _clean(" ".join(pieces[:i]))
+
+    # adres | → konum notu » icap notu
+    m = re.search(f"[{_ARROWS}]", main_txt)
+    address = _clean(main_txt[:m.start()] if m else main_txt)
+    notes = [_clean(x) for x in re.split(rf"\s*[{_ARROWS}]\s*", main_txt[m.start():])] if m else []
+    note = " • ".join(x for x in notes if x)
+
+    # ilçe: sondaki parça > "... X / Ankara" kalıbı > adres taraması > link adresi
+    district = ""
+    for t in tail:
+        district = _district_from_piece(t) or district
+    if not district:
+        mm = re.search(r"([^\s/,\-]+)\s*/\s*(?:Ankara|ANKARA|Nkara)\b", address)
+        if mm:
+            district = _DISTRICT_CANON.get(norm(mm.group(1))) or DISTRICT_ALIASES.get(mm.group(1), "")
+    if not district:
+        district = detect_district(address)
+    if not district:
+        slug = (a.get("href") or "").split("/eczane/ankara-")[-1].split("-")[0]
+        district = _DISTRICT_CANON.get(norm(slug), "")
+
+    row = {"name": name, "district": district, "address": address, "phone": phone}
+    if note:
+        row["note"] = note
+    return row
+
+
+def parse_gentr_html(html: str, today: date = None):
+    """Sayfayı {YYYY-MM-DD: [eczane satırları]} sözlüğüne çevirir."""
+    from bs4 import BeautifulSoup
+
+    today = today or datetime.now(TZ).date()
+    soup = BeautifulSoup(html or "", "lxml")
+    out, seen = {}, set()
+    for a in soup.select(_ELINK):
+        href = a.get("href")
+        if not _clean(a.get_text(" ", strip=True)):
+            continue  # yalnızca ikon içeren (ör. "yol tarifi") link
+        head = a.find_previous(string=lambda s: bool(s) and bool(_DATE_HEAD_RE.match(norm(s))))
+        if head is None:
+            continue
+        m = _DATE_HEAD_RE.match(norm(head))
+        key = _gentr_date(int(m.group(1)), _MONTHS[m.group(2)], today)
+        if (key, href) in seen:
+            continue
+        seen.add((key, href))
+        out.setdefault(key, []).append(_gentr_row(a))
+    return out
+
+
+def _fetch_gentr_html() -> str:
+    errors = []
+    try:  # 1) standart kütüphane
+        req = urllib.request.Request(GENTR_URL, headers={
+            "User-Agent": _UA, "Accept-Language": "tr-TR,tr;q=0.9",
+            "Accept": "text/html,application/xhtml+xml"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            html = r.read().decode("utf-8", "replace")
+        if "/eczane/ankara-" in html:
+            return html
+        errors.append("urllib: beklenen içerik yok")
+    except Exception as e:
+        errors.append(f"urllib: {e}")
+    try:  # 2) curl_cffi
+        from curl_cffi import requests as cr
+        r = cr.get(GENTR_URL, impersonate="chrome", timeout=30)
+        if r.status_code == 200 and "/eczane/ankara-" in r.text:
+            return r.text
+        errors.append(f"curl_cffi: HTTP {r.status_code}")
+    except Exception as e:
+        errors.append(f"curl_cffi: {e}")
+    try:  # 3) tarayıcı
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            br = p.chromium.launch()
+            try:
+                pg = br.new_context(locale="tr-TR", user_agent=_UA).new_page()
+                pg.goto(GENTR_URL, wait_until="domcontentloaded", timeout=45_000)
+                pg.wait_for_timeout(2500)
+                html = pg.content()
+            finally:
+                br.close()
+        if "/eczane/ankara-" in html:
+            return html
+        errors.append("playwright: beklenen içerik yok")
+    except Exception as e:
+        errors.append(f"playwright: {e}")
+    raise RuntimeError("; ".join(errors))
+
+
+def _scrape_gentr(date_iso: str):
+    DEBUG_DIR.mkdir(exist_ok=True)
+    try:
+        html = _fetch_gentr_html()
+    except Exception as e:
+        print(f"[scrape] eczaneler.gen.tr başarısız: {e}", file=sys.stderr)
+        return []
+    (DEBUG_DIR / "gentr.html").write_text(html, encoding="utf-8")
+    groups = parse_gentr_html(html)
+    print("[scrape] eczaneler.gen.tr günler: " +
+          ", ".join(f"{k}={len(v)}" for k, v in sorted(groups.items())))
+    rows = groups.get(date_iso, [])
+    if not rows:
+        print(f"[scrape] eczaneler.gen.tr: {date_iso} için liste yok", file=sys.stderr)
+        return []
+    seen, out = set(), []
+    for r in rows:
+        k = (core_name(r["name"]), norm(r["district"]))
+        if k not in seen and core_name(r["name"]):
+            seen.add(k)
+            out.append(r)
+    print(f"[scrape] tarih={date_iso} kaynak=eczaneler.gen.tr kayıt={len(out)}")
+    return out
+
+
+STATE = {}
+
+
+def scrape(date_iso: str, fetcher: str = "auto", source: str = "eczaneler"):
+    """Varsayılan kaynak eczaneler.gen.tr. source=aeo: yalnızca AEO API'si; source=auto: önce AEO, olmazsa eczaneler.gen.tr."""
+    date_iso = date_iso or datetime.now(TZ).strftime("%Y-%m-%d")
+    order = ["aeo", "eczaneler"] if source == "auto" else [source]
+    rows = []
+    for src in order:
+        rows = _scrape_aeo(date_iso, fetcher) if src == "aeo" else _scrape_gentr(date_iso)
+        if len(rows) >= MIN_EXPECTED:
+            STATE["source"] = src
+            return rows
+        print(f"[scrape] {src}: yeterli veri yok ({len(rows)} kayıt)", file=sys.stderr)
+    return rows
 
 
 # ----------------------------------------------------------------- PH VERİSİ
@@ -462,13 +691,15 @@ def main():
     ap.add_argument("--rows-json", help="scrape etme; bu JSON listesini kullan (test için)")
     ap.add_argument("--fetcher", choices=["auto", "playwright", "curl"], default="auto",
                     help="API'ye erişim yöntemi (auto: önce playwright, olmazsa curl_cffi)")
+    ap.add_argument("--source", choices=["eczaneler", "aeo", "auto"], default="eczaneler",
+                    help="veri kaynağı (varsayılan: eczaneler.gen.tr; aeo: Eczacı Odası API'si; auto: önce AEO, olmazsa eczaneler.gen.tr)")
     args = ap.parse_args()
 
     today = args.date or datetime.now(TZ).strftime("%Y-%m-%d")
     if args.rows_json:
         rows = json.loads(Path(args.rows_json).read_text(encoding="utf-8"))
     else:
-        rows = scrape(today, args.fetcher)
+        rows = scrape(today, args.fetcher, args.source)
 
     rows = [r for r in rows if is_ankara(r)]
     if len(rows) < MIN_EXPECTED:
@@ -487,7 +718,8 @@ def main():
     for u in unmatched:
         print(f"   - {u['name']} ({u['district']}): {u['reason']} {u['candidates'] or ''}")
 
-    payload = {"date": today, "total": len(rows), "matched": matched, "bricks": by_brick}
+    payload = {"date": today, "source": STATE.get("source", "rows-json"),
+               "total": len(rows), "matched": matched, "bricks": by_brick}
 
     if args.dry_run:
         return
