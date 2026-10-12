@@ -1,25 +1,28 @@
 {
- "date": "2026-10-11",
+ "date": "2026-10-12",
  "items": [
   {
-   "name": "MELEK ECZANESİ",
-   "district": "",
-   "address": "Tuzla Mah. Aziz Mahmut Hüdai Bul",
-   "phone": "03126880107",
-   "reason": "ambiguous",
+   "name": "ALP ECZANESİ",
+   "district": "Çankaya",
+   "address": "Ceyhun Atuf Kansu Cad. No:33/B Balgat-Çankaya/Ankara",
+   "phone": "03126580903",
+   "note": "40. Noter Karşısı",
+   "lat": 39.903028,
+   "lng": 32.816673,
+   "reason": "district-mismatch",
    "candidates": [
-    "ANK ERYAMAN",
-    "ANK GOLBASI",
     "ANK GUNEY ILCELER",
-    "ANK KARSIYAKA+IVEDIK",
-    "ANK SOLFASOL+PURSAKLAR"
+    "ANK KUZEY ILCELER"
    ]
   },
   {
-   "name": "TEMELLİ PINAR ECZANESİ",
+   "name": "TEMELLİ ECZANESİ",
    "district": "Sincan",
-   "address": "TEMELLİ-İstiklal Mah. Hürriyet Cad. No:30/A Temelli/ Sincan Gece Saat 21:00'e Kadar Açıktır.",
-   "phone": "05069267388",
+   "address": "İstiklal Mah. Hürriyet Cad. No: 28/B Temelli/Sincan/Ankara (Gece Saat 21:00'e Kadar Açıktır)",
+   "phone": "0312 645 11 63",
+   "note": "ÖZEL NÖBET BÖLGESİ- LÜTFEN TELEFON EDİNİZ",
+   "lat": 39.7277265,
+   "lng": 32.3560231,
    "reason": "district-mismatch",
    "candidates": [
     "ANK POLATLI -2"
