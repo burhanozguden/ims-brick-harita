@@ -576,6 +576,17 @@ const NOBET = {
     "name": "POLATLI ECZANESİ",
     "note": "Çarşı Cami yanı",
     "phone": "03126213734"
+   },
+   {
+    "address": "İstiklal Mah. Hürriyet Cad. No: 28/B Temelli/Sincan/Ankara (Gece Saat 21:00'e Kadar Açıktır)",
+    "district": "Sincan",
+    "key": "temelli",
+    "lat": 39.7277265,
+    "lng": 32.3560231,
+    "match": "ph-name",
+    "name": "TEMELLİ ECZANESİ",
+    "note": "ÖZEL NÖBET BÖLGESİ- LÜTFEN TELEFON EDİNİZ",
+    "phone": "0312 645 11 63"
    }
   ],
   "ANK REMZI OGUZ": [
@@ -711,8 +722,8 @@ const NOBET = {
    }
   ]
  },
- "date": "2026-10-12",
- "matched": 49,
+ "date": "2026-10-11",
+ "matched": 50,
  "total": 51
 };
 /* NOBET:END */
@@ -784,7 +795,7 @@ const nbList=b=>NB.bricks[b]||[];
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cln=s=>String(s||'').replace(/\s+/g,' ').trim();
 const tel=t=>String(t||'').replace(/[^\d+]/g,'');
-const mapUrl=x=>(x.lat!=null&&x.lng!=null&&isFinite(x.lat)&&isFinite(x.lng))?'https://www.google.com/maps/dir/?api=1&destination='+Number(x.lat)+','+Number(x.lng):'';
+const mapUrl=x=>(x.lat!=null&&x.lng!=null&&isFinite(x.lat)&&isFinite(x.lng))?'https://www.google.com/maps/dir/?api=1&destination='+Number(x.lat)+','+Number(x.lng):(x.address?'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(cln(x.name)+' '+cln(x.address)):'');
 const nbPhone=t=>{const d=String(t||'').replace(/\D/g,'');return d.length===11?`${d.slice(0,4)} ${d.slice(4,7)} ${d.slice(7,9)} ${d.slice(9)}`:String(t||'')};
 const sn=s=>String(s||'').toLocaleLowerCase('tr').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/ı/g,'i');
 const short=b=>b.replace('ANKARA ','').replace('ANK ','');
@@ -819,7 +830,7 @@ function updBadges(){for(const b in badges){const vis=(OWN[b]||[]).some(o=>!hidd
  const NOBET_SAATI=9; // nöbet günü TR saatiyle bu saatte değişir; ondan önce hâlâ dünün listesi geçerli
  const today=new Date(Date.now()-NOBET_SAATI*3600e3).toLocaleDateString('sv-SE',{timeZone:'Europe/Istanbul'}), d=NB.date.split('-').reverse().join('.');
  el.style.display='block';
- if(NB.date>=today)el.innerHTML=`🔴 <b>${d}</b> nöbetçi eczaneler: <b>${tot}</b> eczane • <b>${nbr}</b> brick`;
+ if(NB.date>=today)el.innerHTML=`🔴 <b>${d}</b> nöbetçi eczaneler: <b>${tot}</b> eczane • <b>${nbr}</b> brick${NB.source==='eczaneler'?' • <span title="AEO erişilemediği için yedek kaynak kullanıldı">kaynak: eczaneler.gen.tr</span>':''}`;
  else{el.classList.add('old');el.innerHTML=`⚠️ Nöbetçi verisi <b>${d}</b> tarihli (bugünün listesi henüz yüklenmedi) • <b>${tot}</b> eczane`;}})();
 
 // kişi kartları

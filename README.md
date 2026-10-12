@@ -13,7 +13,10 @@ Ankara 2026 brick dağılımını (5 kişi, 83 brick) ve **günün nöbetçi ecz
 Kişi–brick dağılımı `index.html` içindeki `OWN` / `PERS` verisindedir; kişi adı değiştirmek için ikisinde de değiştirin.
 
 ## Veri kaynağı
-`GET https://www.aeo.org.tr/getPharmacies/{YYYY-MM-DD}` (Ankara Eczacı Odası'nın kendi sayfasının kullandığı JSON API'si). Site Cloudflare arkasında olduğu için istek önce Playwright ile açılan oturumdan yapılır; olmazsa `curl_cffi` denenir. Ayrıntı: `aeo_api_findings.md`.
+1. **Ana kaynak — AEO:** `GET https://www.aeo.org.tr/getPharmacies/{YYYY-MM-DD}` (Ankara Eczacı Odası'nın kendi sayfasının kullandığı JSON API'si). Site Cloudflare arkasında olduğu için istek önce Playwright ile açılan oturumdan yapılır; olmazsa `curl_cffi` denenir. Ayrıntı: `aeo_api_findings.md`.
+2. **Yedek kaynak — eczaneler.gen.tr:** AEO'dan yeterli kayıt gelmezse `https://www.eczaneler.gen.tr/nobetci-ankara` sayfası okunur (düz HTTP → `curl_cffi` → tarayıcı sırasıyla). Sayfa dün/bugün/yarın için üç liste içerir; başlıklardaki tarihe göre istenen gün seçilir. Bu site resmi oda sitesi değil, listeleri derleyen üçüncü taraf bir portaldır (kendi kullanım koşullarında "Sitene Ekle" aracını önerir); bu yüzden yalnızca yedek olarak, günde en fazla birkaç istekle kullanılır. Yedek kullanıldığında sayfadaki bilgi satırında "kaynak: eczaneler.gen.tr" yazar. Bu kaynakta koordinat yoktur; yol tarifi bağlantısı adresten üretilir.
+
+Kaynağı elle seçmek için: `--source aeo|eczaneler|auto` (varsayılan `auto`).
 
 ## Eşleştirme
 1. Eczane adı `ph.json` içinde birebir geçiyorsa o brick (aynı ad birden çok brickte varsa ilçe/mahalle ipuçlarıyla seçilir).
@@ -28,7 +31,8 @@ playwright install chromium
 python update_pharmacies.py                      # çek, index.html'i güncelle
 python update_pharmacies.py --dry-run            # yazmadan özet göster
 python update_pharmacies.py --date 2026-10-11    # belirli gün
-python update_pharmacies.py --fetcher curl       # Playwright yerine curl_cffi
+python update_pharmacies.py --source eczaneler   # yalnızca yedek kaynak
+python update_pharmacies.py --fetcher curl       # AEO için Playwright yerine curl_cffi
 python update_pharmacies.py --rows-json x.json   # scrape etmeden hazır liste (test)
 ```
 Veri 20 kayıttan azsa betik hata verir ve `index.html`'e dokunmaz; ayrıntı için `debug/` klasörüne bakın.
