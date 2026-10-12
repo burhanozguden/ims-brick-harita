@@ -29,7 +29,7 @@ import re
 import sys
 import unicodedata
 import urllib.request
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -43,6 +43,13 @@ UNMATCHED_FILE = ROOT / "unmatched.json"
 DEBUG_DIR = ROOT / "debug"
 
 MIN_EXPECTED = 20  # bunun altında veri gelirse dosyaya DOKUNMA (scrape bozulmuş demektir)
+NOBET_SAATI = 9    # nöbet günü TR saatiyle bu saatte değişir. index.html'deki NOBET_SAATI ile AYNI olmalı.
+
+
+def nobet_gunu(now=None) -> str:
+    """Şu an geçerli nöbet gününün tarihi (YYYY-MM-DD). 09:00'dan önce hâlâ dünün listesi geçerlidir."""
+    now = now or datetime.now(TZ)
+    return (now - timedelta(hours=NOBET_SAATI)).strftime("%Y-%m-%d")
 
 DISTRICTS = [
     "Akyurt", "Altındağ", "Ayaş", "Bahşılı", "Bala", "Balıseyh", "Beypazarı",
@@ -287,7 +294,7 @@ FETCHERS = {"playwright": _fetch_with_playwright, "curl": _fetch_with_curl_cffi}
 
 
 def _scrape_aeo(date_iso: str, fetcher: str = "auto"):
-    date_iso = date_iso or datetime.now(TZ).strftime("%Y-%m-%d")
+    date_iso = date_iso or nobet_gunu()
     DEBUG_DIR.mkdir(exist_ok=True)
     order = ["playwright", "curl"] if fetcher == "auto" else [fetcher]
 
@@ -450,7 +457,8 @@ def parse_gentr_html(html: str, today: date = None):
         href = a.get("href")
         if not _clean(a.get_text(" ", strip=True)):
             continue  # yalnızca ikon içeren (ör. "yol tarifi") link
-        head = a.find_previous(string=lambda s: bool(s) and bool(_DATE_HEAD_RE.match(norm(s))))
+        head = a.find_previous(
+            string=lambda s: bool(s) and bool(_DATE_HEAD_RE.match(norm(s))) and "kadar" in norm(s))
         if head is None:
             continue
         m = _DATE_HEAD_RE.match(norm(head))
@@ -532,7 +540,7 @@ STATE = {}
 
 def scrape(date_iso: str, fetcher: str = "auto", source: str = "eczaneler"):
     """Varsayılan kaynak eczaneler.gen.tr. source=aeo: yalnızca AEO API'si; source=auto: önce AEO, olmazsa eczaneler.gen.tr."""
-    date_iso = date_iso or datetime.now(TZ).strftime("%Y-%m-%d")
+    date_iso = date_iso or nobet_gunu()
     order = ["aeo", "eczaneler"] if source == "auto" else [source]
     rows = []
     for src in order:
@@ -627,12 +635,12 @@ def match_bricks(rows, ph_items, groups, rules):
                     reason, cands_out = "ambiguous", pool
 
         # 2) PH'de yok -> kurallar / mahalle ipuçları
-        if not chosen and not cands:
+        if not chosen and (not cands or reason == "district-mismatch"):
             pool = [b for b in all_bricks if compatible(b, dists, hay)] or all_bricks
             w = pick_unique(pool, hay, dist_n, rules, groups)
             if w:
-                chosen, how = w, "rule"
-            else:
+                chosen, how, reason, cands_out = w, "rule", None, []
+            elif not cands:
                 reason = "not-in-ph-no-rule"
 
         item = {**r, "key": key, "match": how}
@@ -695,7 +703,7 @@ def main():
                     help="veri kaynağı (varsayılan: eczaneler.gen.tr; aeo: Eczacı Odası API'si; auto: önce AEO, olmazsa eczaneler.gen.tr)")
     args = ap.parse_args()
 
-    today = args.date or datetime.now(TZ).strftime("%Y-%m-%d")
+    today = args.date or nobet_gunu()
     if args.rows_json:
         rows = json.loads(Path(args.rows_json).read_text(encoding="utf-8"))
     else:
