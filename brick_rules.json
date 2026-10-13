@@ -8,9 +8,9 @@
   "ANK DOGU ILCELER":       { "districts": ["Akyurt", "Elmadağ", "Kalecik"] },
   "ANK GUNEY ILCELER":      { "districts": ["Haymana", "Bala", "Şereflikoçhisar"] },
   "ANK POLATLI -1":         { "districts": ["Polatlı"] },
-  "ANK POLATLI -2":         { "districts": ["Polatlı"] },
+  "ANK POLATLI -2":         { "districts": ["Polatlı"], "keywords": ["Temelli"] },
   "ANK SOLFASOL+PURSAKLAR": { "districts": ["Pursaklar"] },
-  "ANK ERYAMAN":            { "keywords": ["Eryaman"] },
-  "ANK CAYYOLU+UMIT":       { "keywords": ["Ümitköy", "İncek", "Beytepe", "Konutkent", "Yaşamkent"] },
+  "ANK ERYAMAN":            { "keywords": ["Eryaman", "Yaşamkent"] },
+  "ANK CAYYOLU+UMIT":       { "keywords": ["Ümitköy", "İncek", "Beytepe", "Konutkent"] },
   "ANK ATAPARK+23 NISAN":   { "keywords": ["Atapark", "23 Nisan"] }
 }
