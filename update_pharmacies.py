@@ -1,69 +1,66 @@
+<uploaded_files github_repo=burhanozguden/ims-brick-harita>
+<file=update_pharmacies_new.py>
 #!/usr/bin/env python3
 """
-Ankara Eczacı Odası nöbetçi eczanelerini çeker, ph.json içindeki PH
-(brick -> eczane adları) yapısına göre bricklere eşler ve NOBET verisini
-index.html'e AYRI bir <script id="nobet-data"> bloğu olarak yazar.
+Ankara nöbetçi eczanelerini https://www.eczaneler.gen.tr/nobetci-ankara sayfasından çeker,
+ph.json'daki brick listeleriyle (brick_rules.json ipuçlarıyla) eşleştirir ve şunları günceller:
 
-NOT: Tüm eczane listesi (PH) sayfaya gömülmez, ph.json'da durur. Sayfada yalnızca günün
-nöbetçileri (NOBET) bulunur; ana script'ten ÖNCE gelen ayrı bir <script> bloğuna yazılır.
+  * index.html     -> <script id="nobet-data"> içindeki NOBET verisi (haritanın okuduğu blok)
+  * ph.json        -> "ph"/"groups" AYNEN korunur; "pharmacies" listesi (br_id, name, district,
+                      address, phone, on_duty) ve "on_duty_date" yazılır
+  * unmatched.json -> eşleşmeyen nöbetçiler (nedeniyle birlikte)
 
-Eşleştirme sırası:
-  1) Nöbetçi eczane adı PH içinde BİREBİR (ECZANESİ ekini yok sayarak) geçiyorsa -> o brick
-     (aynı ad birden çok brickte varsa ilçe/mahalle ipuçlarıyla seçilir)
-  2) PH'de yoksa brick_rules.json + brick adındaki mahalle ipuçları
-  3) Eşleşmeyenler unmatched.json'a (nedeniyle birlikte) yazılır
+Tarih: Sayfanın adresi sabittir; sayfa dün/bugün/yarın için üç sekme içerir ve her sekme
+"12 Ekim P.tesi akşamından 13 Ekim Salı sabahına kadar." gibi bir başlıkla başlar. Betik
+bugünün tarihini (Europe/Istanbul) hesaplar ve bu başlıklara göre doğru listeyi seçer.
+İsteğe bağlı olarak GENTR_URL ortam değişkeninde {date} / {date_tr} yer tutucusu kullanılabilir.
 
 Kullanım:
-  python update_pharmacies.py                 # siteden çek, index.html'i güncelle
-  python update_pharmacies.py --dry-run       # yazmadan özet göster
-  python update_pharmacies.py --rows-json x.json   # scrape etmeden, hazır JSON listesiyle
-  python update_pharmacies.py --date 2026-10-11    # belirli bir günün nöbet listesi
-  python update_pharmacies.py --fetcher curl       # Playwright yerine curl_cffi ile
+  python update_pharmacies_new.py                    # bugünün listesi, dosyaları güncelle
+  python update_pharmacies_new.py --dry-run          # yazmadan özet
+  python update_pharmacies_new.py --date 2026-10-13  # belirli gün (sayfada varsa: dün/bugün/yarın)
+  python update_pharmacies_new.py --html-file x.html # siteye gitmeden, kaydedilmiş sayfayla
+  python update_pharmacies_new.py --rows-json x.json # hazır eczane listesiyle (test)
 
-Veri: https://www.aeo.org.tr/getPharmacies/{YYYY-MM-DD} JSON API'si (bkz. SCRAPING bölümü).
+Çıkış kodları: 0 = başarılı (değişiklik olmasa da), 1 = veri alınamadı/yetersiz,
+2 = yapılandırma/dosya hatası. Hata durumunda hiçbir dosyaya dokunulmaz.
 """
 import argparse
 import json
 import os
 import re
 import sys
+import time
 import unicodedata
-import urllib.request
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-URL = "https://www.aeo.org.tr/nobetci-eczaneler"
 TZ = ZoneInfo("Europe/Istanbul")
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(os.environ.get("NOBET_ROOT") or Path(__file__).resolve().parent)
 HTML_FILE = ROOT / "index.html"
-RULES_FILE = ROOT / "brick_rules.json"
 PH_FILE = ROOT / "ph.json"
+RULES_FILE = ROOT / "brick_rules.json"
 UNMATCHED_FILE = ROOT / "unmatched.json"
 DEBUG_DIR = ROOT / "debug"
 
-MIN_EXPECTED = 20  # bunun altında veri gelirse dosyaya DOKUNMA (scrape bozulmuş demektir)
-NOBET_SAATI = 9    # nöbet günü TR saatiyle bu saatte değişir. index.html'deki NOBET_SAATI ile AYNI olmalı.
-
-
-def nobet_gunu(now=None) -> str:
-    """Şu an geçerli nöbet gününün tarihi (YYYY-MM-DD). 09:00'dan önce hâlâ dünün listesi geçerlidir."""
-    now = now or datetime.now(TZ)
-    return (now - timedelta(hours=NOBET_SAATI)).strftime("%Y-%m-%d")
+GENTR_URL = os.environ.get("GENTR_URL", "https://www.eczaneler.gen.tr/nobetci-ankara")
+MIN_EXPECTED = int(os.environ.get("MIN_EXPECTED", "20"))  # altında veri gelirse dosyalara DOKUNMA
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
 DISTRICTS = [
-    "Akyurt", "Altındağ", "Ayaş", "Bahşılı", "Bala", "Balıseyh", "Beypazarı",
+    "Akyurt", "Altındağ", "Ayaş", "Bahşılı", "Bala", "Balışeyh", "Beypazarı",
     "Çamlıdere", "Çankaya", "Çubuk", "Delice", "Elmadağ", "Etimesgut", "Evren",
     "Gölbaşı", "Güdül", "Haymana", "Kalecik", "Karakeçili", "Kazan", "Keçiören",
     "Keskin", "Kırıkkale", "Kızılcahamam", "Mamak", "Nallıhan", "Polatlı",
     "Pursaklar", "Sincan", "Sulakyurt", "Şereflikoçhisar", "Yahşihan", "Yenimahalle",
 ]
-
-# AEO sayfası Kırıkkale ilini de listeliyor; Ankara haritasında istemiyoruz.
+DISTRICT_ALIASES = {"Kahramankazan": "Kazan"}
 KIRIKKALE_DISTRICTS = {"kirikkale", "keskin", "delice", "baliseyh", "karakecili",
                        "yahsihan", "sulakyurt", "bahsili", "celebi"}
 
-# Brick grubu -> o gruptaki bricklerde bulunabilecek ilçeler (sadece aday SÜZMEK için).
+# Brick grubu -> o gruptaki bricklerde bulunabilecek ilçeler (yalnızca aday süzmek için)
 GROUP_DISTRICTS = {
     "sincan etimesgut": {"sincan", "etimesgut"},
     "yenimahalle batikent": {"yenimahalle"},
@@ -76,8 +73,7 @@ GROUP_DISTRICTS = {
                       "golbasi", "gudul", "haymana", "kalecik", "kazan", "kizilcahamam",
                       "nallihan", "polatli", "sereflikochisar"},
 }
-
-# Beraberlikte: ilçenin "ana" brick grubuna +1 puan
+# Beraberlikte ilçenin "ana" brick grubuna +1 puan
 PRIMARY_GROUP = {
     "sincan": "sincan etimesgut", "etimesgut": "sincan etimesgut",
     "yenimahalle": "yenimahalle batikent",
@@ -86,7 +82,11 @@ PRIMARY_GROUP = {
 }
 
 
-# ----------------------------------------------------------------- yardımcılar
+class FetchError(RuntimeError):
+    pass
+
+
+# ---------------------------------------------------------------- yardımcılar
 _TR = str.maketrans("İIıŞşĞğÜüÖöÇç", "iiissgguuoocc")
 STOP = {"eczanesi", "eczane", "ecz", "nobetci", "ve"}
 
@@ -103,17 +103,35 @@ def core_name(name: str) -> str:
     return " ".join(t for t in norm(name).split() if t not in STOP)
 
 
-# Adreste farklı yazılan ilçe adları -> AEO'daki ilçe adı
-DISTRICT_ALIASES = {"Kahramankazan": "Kazan"}
+def tr_upper(s: str) -> str:
+    """Türkçe büyük harf: 'Esra Eczanesi' -> 'ESRA ECZANESİ'."""
+    s = unicodedata.normalize("NFC", s or "").replace("i\u0307", "i")
+    return s.replace("i", "İ").replace("ı", "I").upper()
+
+
+def clean(s: str) -> str:
+    return re.sub(r"\s+", " ", s or "").strip()
+
+
+_DISTRICT_CANON = {norm(d): d for d in DISTRICTS}
+_DISTRICT_PAIRS = [(d, d) for d in DISTRICTS] + list(DISTRICT_ALIASES.items())
 
 
 def detect_district(text: str) -> str:
     t = f" {norm(text)} "
-    best, best_len = "", 0
-    for name, canon in [(d, d) for d in DISTRICTS] + list(DISTRICT_ALIASES.items()):
-        if f" {norm(name)} " in t and len(name) > best_len:
-            best, best_len = canon, len(name)
-    return best
+    best = ""
+    for name, canon in _DISTRICT_PAIRS:
+        if f" {norm(name)} " in t and len(name) > len(best):
+            best, found = name, canon
+    return found if best else ""
+
+
+def district_from_piece(piece: str) -> str:
+    n, best, found = norm(piece), "", ""
+    for name, canon in _DISTRICT_PAIRS:
+        if n.startswith(norm(name)) and len(name) > len(best):
+            best, found = name, canon
+    return found
 
 
 def is_ankara(r) -> bool:
@@ -122,229 +140,145 @@ def is_ankara(r) -> bool:
     return norm(r.get("district", "")) not in KIRIKKALE_DISTRICTS
 
 
-PHONE_RE = re.compile(r"(?:\+?90\s*)?0?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}")
-
-# ----------------------------------------------------------------- SCRAPING
-# Veri kaynağı: AEO'nun kendi sayfasının da kullandığı JSON API'si.
-#   GET https://www.aeo.org.tr/getPharmacies/{YYYY-MM-DD}
-#   -> {"status": "success", "html": "<div class='petition-list'> ... </div>"}
-# Content-Type yanlış olarak text/html döner; gövde json.loads ile çözülür.
-# Site Cloudflare arkasında: çıplak requests/curl 403 alır. Bu yüzden önce
-# Playwright ile sayfa açılır (cf_clearance/ci_session çerezleri oluşur) ve istek
-# page.evaluate(fetch(...)) ile AYNI tarayıcı oturumundan yapılır.
-# Playwright başarısız olursa curl_cffi (Chrome TLS parmak izi taklidi) denenir.
-API_URL = "https://www.aeo.org.tr/getPharmacies/{date}"
-COORD_RE = re.compile(r"query=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)")
-_DISTRICT_CANON = {norm(d): d for d in DISTRICTS}
-
-_FETCH_JS = """async (url) => {
-    const r = await fetch(url, {method: "GET", credentials: "include",
-                                headers: {"Accept": "*/*"}, cache: "no-store"});
-    return {status: r.status, text: await r.text()};
-}"""
+def today_tr() -> str:
+    """Bugünün tarihi (Europe/Istanbul). GitHub Actions 01:00 UTC = 04:00 TR'de çalışır;
+    bu saatte sayfada bugünün (akşamdan ertesi sabaha) listesi zaten bulunur."""
+    return datetime.now(TZ).date().isoformat()
 
 
-def _clean(s: str) -> str:
-    return re.sub(r"\s+", " ", s or "").strip()
+def build_url(date_iso: str) -> str:
+    """GENTR_URL içinde {date} (YYYY-MM-DD) / {date_tr} (GG.AA.YYYY) varsa doldurur."""
+    d = date.fromisoformat(date_iso)
+    return GENTR_URL.format(date=date_iso, date_tr=d.strftime("%d.%m.%Y"))
 
 
-def parse_pharmacies_html(html: str):
-    """getPharmacies yanıtındaki `html` alanını eczane satırlarına çevirir.
-
-    Kart yapısı:
-      <div class="inline-box" data-name="ÇİĞDEM" data-district="Çankaya">
-        <h4>ÇİĞDEM ECZANESİ</h4>
-        <p>ADRES<br>TARİF/NOT<span>TELEFON</span></p>
-        <a href="https://www.google.com/maps/search/?api=1&query=LAT,LNG">
-        <a href="tel:03122860385">
-    """
-    from bs4 import BeautifulSoup, NavigableString, Tag
-
-    soup = BeautifulSoup(html or "", "lxml")
-    rows = []
-    for box in soup.select("div.inline-box"):
-        h4 = box.find("h4")
-        name = _clean(h4.get_text(" ", strip=True) if h4 else box.get("data-name", ""))
-        if not name:
-            continue
-
-        address, note, phone = "", "", ""
-        p = box.select_one(".text p") or box.find("p")
-        if p is not None:
-            before, after, seen_br = [], [], False
-            for node in p.children:
-                if isinstance(node, Tag) and node.name == "br":
-                    seen_br = True
-                elif isinstance(node, Tag) and node.name == "span":
-                    phone = phone or _clean(node.get_text(" ", strip=True))
-                elif isinstance(node, (NavigableString, Tag)):
-                    txt = node.get_text(" ", strip=True) if isinstance(node, Tag) else str(node)
-                    (after if seen_br else before).append(txt)
-            address, note = _clean(" ".join(before)), _clean(" ".join(after))
-
-        tel = box.select_one('a[href^="tel:"]')
-        if tel is not None:
-            phone = _clean(tel["href"][4:]) or phone
-        if not phone:
-            m = PHONE_RE.search(box.get_text(" ", strip=True))
-            phone = m.group(0).strip() if m else ""
-
-        # data-district geçerli bir ilçe değilse (ör. "Ilcesi Belirlenmemis") adresten bul
-        raw_dist = _clean(box.get("data-district", ""))
-        district = _DISTRICT_CANON.get(norm(raw_dist)) or detect_district(f"{address} {note}")
-
-        row = {"name": name, "district": district, "address": address, "phone": phone}
-        if note:
-            row["note"] = note
-        maps = box.select_one('a[href*="google.com/maps"]')
-        m = COORD_RE.search(maps["href"]) if maps is not None else None
-        if m:
-            row["lat"], row["lng"] = float(m.group(1)), float(m.group(2))
-        rows.append(row)
-    return rows
+# ---------------------------------------------------------------- İNDİRME
+def _looks_ok(html: str) -> bool:
+    return bool(html) and "/eczane/" in html and "akşamından" in html
 
 
-def _decode_api(text: str) -> str:
-    """API gövdesini çöz; başarılıysa `html` alanını döndür, değilse ValueError."""
+def _save_debug(name: str, text: str):
     try:
-        data = json.loads(text)
-    except Exception:
-        snippet = _clean(text[:120])
-        raise ValueError(f"JSON değil (Cloudflare engeli olabilir): {snippet!r}")
-    if not isinstance(data, dict) or data.get("status") != "success" or not data.get("html"):
-        raise ValueError(f"beklenmeyen yanıt: status={data.get('status') if isinstance(data, dict) else type(data)}")
-    return data["html"]
+        DEBUG_DIR.mkdir(exist_ok=True)
+        (DEBUG_DIR / name).write_text(text or "", encoding="utf-8")
+    except OSError:
+        pass
 
 
-def _fetch_with_playwright(date_iso: str) -> str:
-    from playwright.sync_api import sync_playwright
+def _fetch_requests(url: str) -> str:
+    import requests
 
-    url = API_URL.format(date=date_iso)
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
+        "Referer": "https://www.eczaneler.gen.tr/",
+    })
+    last = None
+    for attempt in range(1, 4):
+        try:
+            r = s.get(url, timeout=30)
+            r.encoding = r.encoding if r.encoding and r.encoding.lower() != "iso-8859-1" else "utf-8"
+            print(f"[fetch] requests deneme={attempt} HTTP {r.status_code} {len(r.text)} bayt")
+            if r.status_code == 200 and _looks_ok(r.text):
+                return r.text
+            _save_debug("requests.html", r.text)
+            last = f"HTTP {r.status_code}" + (" (Cloudflare)" if "cloudflare" in r.text.lower() else "")
+            if r.status_code in (403, 503) and "cloudflare" in r.text.lower():
+                break  # Cloudflare engeli: tekrar denemek işe yaramaz, sıradaki yönteme geç
+        except requests.RequestException as e:
+            last = str(e)
+        time.sleep(3 * attempt)
+    raise FetchError(f"requests: {last}")
+
+
+def _fetch_curl_cffi(url: str) -> str:
+    try:
+        from curl_cffi import requests as creq
+    except ImportError:
+        raise FetchError("curl_cffi kurulu değil")
+    last = None
+    for imp in ("chrome", "chrome131", "safari", "edge"):
+        try:
+            r = creq.get(url, impersonate=imp, timeout=30,
+                         headers={"Accept-Language": "tr-TR,tr;q=0.9"})
+            print(f"[fetch] curl_cffi({imp}) HTTP {r.status_code} {len(r.text)} bayt")
+            if r.status_code == 200 and _looks_ok(r.text):
+                return r.text
+            _save_debug(f"curl_{imp}.html", r.text)
+            last = f"HTTP {r.status_code}"
+        except Exception as e:  # desteklenmeyen impersonate adı vb.
+            last = str(e)
+    raise FetchError(f"curl_cffi: {last}")
+
+
+def _fetch_playwright(url: str) -> str:
+    """Gerçek Chromium ile sayfayı açar; Cloudflare'ın otomatik (etkileşimsiz) kontrolünün
+    bitmesini bekler. DISPLAY varsa (ör. xvfb-run) görünür modda açılır."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        raise FetchError("playwright kurulu değil")
+    headless = not os.environ.get("DISPLAY")
     with sync_playwright() as p:
-        browser = p.chromium.launch(args=["--disable-blink-features=AutomationControlled"])
+        br = p.chromium.launch(headless=headless,
+                               args=["--disable-blink-features=AutomationControlled"])
         try:
-            # Varsayılan UA "HeadlessChrome" içerir ve Cloudflare tarafından engellenir;
-            # tarayıcının gerçek sürümüyle normal bir Chrome UA'sı kullanılır.
-            major = browser.version.split(".")[0]
-            ctx = browser.new_context(
-                locale="tr-TR", timezone_id="Europe/Istanbul",
-                user_agent=(f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                            f"(KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"),
-            )
-            ctx.add_init_script(
-                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            page = ctx.new_page()
-            page.goto(URL, wait_until="domcontentloaded", timeout=60_000)
-
-            # Cloudflare ara sayfası ("Just a moment..." / "Bir dakika lütfen...") geçene kadar bekle
-            for _ in range(30):
-                title = norm(page.title())
-                if "moment" not in title and "dakika" not in title:
-                    break
-                page.wait_for_timeout(1000)
-
-            last_err = None
-            for attempt in range(1, 4):
-                res = page.evaluate(_FETCH_JS, url)
-                print(f"[scrape] playwright deneme={attempt} HTTP {res['status']} "
-                      f"{len(res['text'])} bayt")
-                try:
-                    if res["status"] != 200:
-                        raise ValueError(f"HTTP {res['status']}")
-                    return _decode_api(res["text"])
-                except ValueError as e:
-                    last_err = e
-                    (DEBUG_DIR / "api_response_playwright.txt").write_text(
-                        res["text"][:20000], encoding="utf-8")
-                    page.wait_for_timeout(3000 * attempt)
+            ctx = br.new_context(locale="tr-TR", timezone_id="Europe/Istanbul", user_agent=UA,
+                                 viewport={"width": 1280, "height": 900})
+            ctx.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
+            pg = ctx.new_page()
+            resp = pg.goto(url, wait_until="domcontentloaded", timeout=60_000)
+            print(f"[fetch] playwright(headless={headless}) ilk yanıt HTTP {resp.status if resp else '?'}")
+            html = ""
+            for _ in range(40):
+                html = pg.content()
+                if _looks_ok(html):
+                    return html
+                pg.wait_for_timeout(1000)
+            _save_debug("playwright.html", html)
             try:
-                page.screenshot(path=str(DEBUG_DIR / "screenshot.png"), full_page=True)
+                pg.screenshot(path=str(DEBUG_DIR / "playwright.png"), full_page=True)
             except Exception:
                 pass
-            raise RuntimeError(f"Playwright ile API okunamadı: {last_err}")
+            raise FetchError(f"playwright: içerik gelmedi (başlık: {pg.title()!r})")
         finally:
-            browser.close()
+            br.close()
 
 
-def _fetch_with_curl_cffi(date_iso: str) -> str:
-    from curl_cffi import requests as creq
+FETCHERS = [("requests", _fetch_requests), ("curl_cffi", _fetch_curl_cffi),
+            ("playwright", _fetch_playwright)]
 
-    last_err = None
-    for imp in ("chrome", "safari"):
+
+def fetch_html(url: str) -> str:
+    errors = []
+    for name, fn in FETCHERS:
         try:
-            s = creq.Session(impersonate=imp)
-            s.get(URL, timeout=30)  # oturum çerezleri (ci_session vb.)
-            r = s.get(API_URL.format(date=date_iso), timeout=30,
-                      headers={"Accept": "*/*", "Referer": URL})
-            print(f"[scrape] curl_cffi({imp}) HTTP {r.status_code} {len(r.text)} bayt")
-            if r.status_code != 200:
-                raise ValueError(f"HTTP {r.status_code}")
-            return _decode_api(r.text)
+            html = fn(url)
+            print(f"[fetch] başarılı: {name}")
+            return html
         except Exception as e:
-            last_err = e
-            try:
-                (DEBUG_DIR / f"api_response_curl_{imp}.txt").write_text(
-                    r.text[:20000], encoding="utf-8")
-            except Exception:
-                pass
-    raise RuntimeError(f"curl_cffi ile API okunamadı: {last_err}")
+            print(f"[fetch] {name} başarısız: {e}", file=sys.stderr)
+            errors.append(str(e))
+    _save_debug("errors.txt", "\n".join(errors))
+    raise FetchError("; ".join(errors))
 
 
-FETCHERS = {"playwright": _fetch_with_playwright, "curl": _fetch_with_curl_cffi}
-
-
-def _scrape_aeo(date_iso: str, fetcher: str = "auto"):
-    date_iso = date_iso or nobet_gunu()
-    DEBUG_DIR.mkdir(exist_ok=True)
-    order = ["playwright", "curl"] if fetcher == "auto" else [fetcher]
-
-    html, source, errors = None, None, []
-    for name in order:
-        try:
-            html, source = FETCHERS[name](date_iso), name
-            break
-        except Exception as e:
-            print(f"[scrape] {name} başarısız: {e}", file=sys.stderr)
-            errors.append(f"{name}: {e}")
-    if html is None:
-        (DEBUG_DIR / "errors.txt").write_text("\n".join(errors), encoding="utf-8")
-        print("HATA: API verisi alınamadı.", file=sys.stderr)
-        return []
-
-    (DEBUG_DIR / "api.html").write_text(html, encoding="utf-8")
-    rows = parse_pharmacies_html(html)
-
-    seen, out = set(), []
-    for r in rows:
-        k = (core_name(r["name"]), norm(r["district"]))
-        if k not in seen and core_name(r["name"]):
-            seen.add(k)
-            out.append(r)
-    print(f"[scrape] tarih={date_iso} kaynak=api/{source} kayıt={len(out)}")
-    return out
-
-
-# ----------------------------------------------------------------- YEDEK KAYNAK: eczaneler.gen.tr
-# Varsayılan veri kaynağı (AEO sitesi Cloudflare nedeniyle güvenilir çekilemediği için). Sayfa üç günlük liste içerir
-# (dün/bugün/yarın); her blok "12 Ekim P.tesi akşamından 13 Ekim ... sabahına kadar." gibi
-# bir başlıkla başlar. Başlıktaki tarih, istenen güne (date_iso) eşlenir.
-# NOT: Bu site Ankara Eczacı Odası'nın resmi sitesi değil, listeleri derleyen üçüncü taraf bir
-# portaldır (kullanım koşullarına bakınız); listeleri Ankara Eczacı Odası'ndan derler.
-GENTR_URL = os.environ.get("GENTR_URL", "https://www.eczaneler.gen.tr/nobetci-ankara")
-_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+# ---------------------------------------------------------------- AYRIŞTIRMA
 _MONTHS = {"ocak": 1, "subat": 2, "mart": 3, "nisan": 4, "mayis": 5, "haziran": 6,
            "temmuz": 7, "agustos": 8, "eylul": 9, "ekim": 10, "kasim": 11, "aralik": 12}
 _DATE_HEAD_RE = re.compile(r"^\s*(\d{1,2}) (" + "|".join(_MONTHS) + r")\b")
 _PHONE_PIECE_RE = re.compile(r"^\+?[\d\s()\-]{10,22}$")
-_PHONE_IN_TEXT_RE = re.compile(r"0?\s*\(\s*\d{3}\s*\)\s*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}")
+_PHONE_IN_TEXT_RE = re.compile(r"0?\s*\(?\s*\d{3}\s*\)?\s*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}")
 _ARROWS = "→»"
-_ELINK = 'a[href*="/eczane/ankara-"]'
+_ELINK = 'a[href*="/eczane/"]'
 
 
-def _gentr_date(day: int, month: int, today: date) -> str:
-    best = min((date(y, month, day) for y in (today.year - 1, today.year, today.year + 1)),
-               key=lambda d: abs((d - today).days))
+def _head_date(day: int, month: int, ref: date) -> str:
+    """Başlıkta yıl yok: referans tarihe en yakın yılı seç (yılbaşı geçişleri için)."""
+    best = min((date(y, month, day) for y in (ref.year - 1, ref.year, ref.year + 1)),
+               key=lambda d: abs((d - ref).days))
     return best.isoformat()
 
 
@@ -357,54 +291,52 @@ def _digits_to_phone(s: str) -> str:
     return d
 
 
-def _district_from_piece(piece: str) -> str:
-    n, best, found = norm(piece), "", ""
-    for name, canon in [(d, d) for d in DISTRICTS] + list(DISTRICT_ALIASES.items()):
-        if n.startswith(norm(name)) and len(name) > len(best):
-            best, found = name, canon
-    return found
-
-
-def _gentr_container(a):
-    """Bu eczane linkini (ve yalnızca onu) içeren en geniş ata öğe = eczane satırı/kartı."""
+def _container(a):
+    """Bu eczane linkini (ve yalnızca onu) içeren en geniş ata öğe = eczane satırı (<tr>/kart)."""
     cur = a
     while cur.parent is not None and getattr(cur.parent, "name", None) not in (None, "body", "html", "[document]"):
         par = cur.parent
-        if len({x.get("href") for x in par.select(_ELINK)}) > 1:
+        if par.name in ("tbody", "table") or len({x.get("href") for x in par.select(_ELINK)}) > 1:
             break
         cur = par
     return cur
 
 
-def _gentr_row(a):
-    cont = _gentr_container(a)
-    name = _clean(a.get_text(" ", strip=True))
-    pieces = [_clean(s) for s in cont.stripped_strings]
+def _parse_row(a):
+    cont = _container(a)
+    name = clean(a.get_text(" ", strip=True))
+    pieces = [clean(s) for s in cont.stripped_strings]
     pieces = [s for s in pieces if s]
     if name in pieces:
         pieces.remove(name)
 
-    # telefon
     phone = ""
-    for i in range(len(pieces) - 1, -1, -1):
-        if _PHONE_PIECE_RE.match(pieces[i]):
-            phone = _digits_to_phone(pieces.pop(i))
-            break
+    tel = cont.select_one('a[href^="tel:"]')
+    if tel is not None:
+        phone = _digits_to_phone(tel["href"][4:])
+        txt = clean(tel.get_text(" ", strip=True))
+        if txt in pieces:
+            pieces.remove(txt)
+    if not phone:
+        for i in range(len(pieces) - 1, -1, -1):
+            if _PHONE_PIECE_RE.match(pieces[i]):
+                phone = _digits_to_phone(pieces.pop(i))
+                break
     if not phone:
         for i, s in enumerate(pieces):
             m = _PHONE_IN_TEXT_RE.search(s)
             if m:
                 phone = _digits_to_phone(m.group(0))
-                pieces[i] = _clean(s.replace(m.group(0), ""))
+                pieces[i] = clean(s.replace(m.group(0), ""))
                 break
         pieces = [s for s in pieces if s]
 
-    # sondaki "İlçe [Mahalle]" parçalarını ayır
+    # sondaki "İlçe [Mahalle]" rozetlerini ayır
     def short(s):
         return len(s) <= 28 and not re.search(r"\d", s) and s[0] not in _ARROWS
 
     def dlike(s):
-        return short(s) and bool(_district_from_piece(s))
+        return short(s) and bool(district_from_piece(s))
 
     tail, i = [], len(pieces)
     while i > 1:
@@ -418,26 +350,26 @@ def _gentr_row(a):
             i -= 1
             continue
         break
-    main_txt = _clean(" ".join(pieces[:i]))
+    main_txt = clean(" ".join(pieces[:i]))
 
     # adres | → konum notu » icap notu
     m = re.search(f"[{_ARROWS}]", main_txt)
-    address = _clean(main_txt[:m.start()] if m else main_txt)
-    notes = [_clean(x) for x in re.split(rf"\s*[{_ARROWS}]\s*", main_txt[m.start():])] if m else []
+    address = clean(main_txt[:m.start()] if m else main_txt)
+    notes = [clean(x) for x in re.split(rf"\s*[{_ARROWS}]\s*", main_txt[m.start():])] if m else []
     note = " • ".join(x for x in notes if x)
 
-    # ilçe: sondaki parça > "... X / Ankara" kalıbı > adres taraması > link adresi
+    # ilçe: rozet > "... X / Ankara" kalıbı > adres taraması > link adresi
     district = ""
     for t in tail:
-        district = _district_from_piece(t) or district
+        district = district_from_piece(t) or district
     if not district:
-        mm = re.search(r"([^\s/,\-]+)\s*/\s*(?:Ankara|ANKARA|Nkara)\b", address)
+        mm = re.search(r"([^\s/,\-]+)\s*/\s*(?:Ankara|ANKARA)\b", address)
         if mm:
             district = _DISTRICT_CANON.get(norm(mm.group(1))) or DISTRICT_ALIASES.get(mm.group(1), "")
     if not district:
         district = detect_district(address)
     if not district:
-        slug = (a.get("href") or "").split("/eczane/ankara-")[-1].split("-")[0]
+        slug = (a.get("href") or "").rsplit("/", 1)[-1].replace("ankara-", "", 1).split("-")[0]
         district = _DISTRICT_CANON.get(norm(slug), "")
 
     row = {"name": name, "district": district, "address": address, "phone": phone}
@@ -446,140 +378,55 @@ def _gentr_row(a):
     return row
 
 
-def parse_gentr_html(html: str, today: date = None):
-    """Sayfayı {YYYY-MM-DD: [eczane satırları]} sözlüğüne çevirir."""
+def parse_page(html: str, ref: date = None) -> dict:
+    """Sayfayı {YYYY-MM-DD: [eczane satırları]} sözlüğüne çevirir. Her eczane linki, kendinden
+    önce gelen en yakın "GG Ay ... akşamından ... sabahına kadar" başlığının gününe atanır."""
     from bs4 import BeautifulSoup
 
-    today = today or datetime.now(TZ).date()
+    ref = ref or datetime.now(TZ).date()
     soup = BeautifulSoup(html or "", "lxml")
     out, seen = {}, set()
     for a in soup.select(_ELINK):
         href = a.get("href")
-        if not _clean(a.get_text(" ", strip=True)):
-            continue  # yalnızca ikon içeren (ör. "yol tarifi") link
+        if not clean(a.get_text(" ", strip=True)):
+            continue  # yalnızca ikon içeren link
         head = a.find_previous(
             string=lambda s: bool(s) and bool(_DATE_HEAD_RE.match(norm(s))) and "kadar" in norm(s))
         if head is None:
             continue
         m = _DATE_HEAD_RE.match(norm(head))
-        key = _gentr_date(int(m.group(1)), _MONTHS[m.group(2)], today)
+        key = _head_date(int(m.group(1)), _MONTHS[m.group(2)], ref)
         if (key, href) in seen:
             continue
         seen.add((key, href))
-        out.setdefault(key, []).append(_gentr_row(a))
+        out.setdefault(key, []).append(_parse_row(a))
     return out
 
 
-def _fetch_gentr_html() -> str:
-    errors = []
-    try:  # 1) standart kütüphane
-        req = urllib.request.Request(GENTR_URL, headers={
-            "User-Agent": _UA, "Accept-Language": "tr-TR,tr;q=0.9",
-            "Accept": "text/html,application/xhtml+xml"})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            html = r.read().decode("utf-8", "replace")
-        if "/eczane/ankara-" in html:
-            return html
-        errors.append("urllib: beklenen içerik yok")
-    except Exception as e:
-        errors.append(f"urllib: {e}")
-    try:  # 2) curl_cffi
-        from curl_cffi import requests as cr
-        r = cr.get(GENTR_URL, impersonate="chrome", timeout=30)
-        if r.status_code == 200 and "/eczane/ankara-" in r.text:
-            return r.text
-        errors.append(f"curl_cffi: HTTP {r.status_code}")
-    except Exception as e:
-        errors.append(f"curl_cffi: {e}")
-    try:  # 3) tarayıcı
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            br = p.chromium.launch()
-            try:
-                pg = br.new_context(locale="tr-TR", user_agent=_UA).new_page()
-                pg.goto(GENTR_URL, wait_until="domcontentloaded", timeout=45_000)
-                pg.wait_for_timeout(2500)
-                html = pg.content()
-            finally:
-                br.close()
-        if "/eczane/ankara-" in html:
-            return html
-        errors.append("playwright: beklenen içerik yok")
-    except Exception as e:
-        errors.append(f"playwright: {e}")
-    raise RuntimeError("; ".join(errors))
-
-
-def _scrape_gentr(date_iso: str):
-    DEBUG_DIR.mkdir(exist_ok=True)
-    try:
-        html = _fetch_gentr_html()
-    except Exception as e:
-        print(f"[scrape] eczaneler.gen.tr başarısız: {e}", file=sys.stderr)
-        return []
-    (DEBUG_DIR / "gentr.html").write_text(html, encoding="utf-8")
-    groups = parse_gentr_html(html)
-    print("[scrape] eczaneler.gen.tr günler: " +
-          ", ".join(f"{k}={len(v)}" for k, v in sorted(groups.items())))
-    rows = groups.get(date_iso, [])
-    if not rows:
-        print(f"[scrape] eczaneler.gen.tr: {date_iso} için liste yok", file=sys.stderr)
-        return []
+def dedupe(rows):
     seen, out = set(), []
     for r in rows:
-        k = (core_name(r["name"]), norm(r["district"]))
-        if k not in seen and core_name(r["name"]):
+        k = (core_name(r["name"]), norm(r.get("district", "")))
+        if core_name(r["name"]) and k not in seen:
             seen.add(k)
             out.append(r)
-    print(f"[scrape] tarih={date_iso} kaynak=eczaneler.gen.tr kayıt={len(out)}")
     return out
 
 
-STATE = {}
-
-
-def scrape(date_iso: str, fetcher: str = "auto", source: str = "eczaneler"):
-    """Varsayılan kaynak eczaneler.gen.tr. source=aeo: yalnızca AEO API'si; source=auto: önce AEO, olmazsa eczaneler.gen.tr."""
-    date_iso = date_iso or nobet_gunu()
-    order = ["aeo", "eczaneler"] if source == "auto" else [source]
-    rows = []
-    for src in order:
-        rows = _scrape_aeo(date_iso, fetcher) if src == "aeo" else _scrape_gentr(date_iso)
-        if len(rows) >= MIN_EXPECTED:
-            STATE["source"] = src
-            return rows
-        print(f"[scrape] {src}: yeterli veri yok ({len(rows)} kayıt)", file=sys.stderr)
-    return rows
-
-
-# ----------------------------------------------------------------- PH VERİSİ
-def load_ph_file():
-    """ph.json -> (PH: {brick: [eczane adı]}, groups: {brick: normalize edilmiş grup adı})"""
-    if not PH_FILE.exists():
-        raise SystemExit(f"HATA: {PH_FILE.name} bulunamadı.")
-    d = json.loads(PH_FILE.read_text(encoding="utf-8"))
-    if "ph" not in d:
-        raise SystemExit(f"HATA: {PH_FILE.name} beklenen biçimde değil ('ph' anahtarı yok). "
-                         f"Bu dosya brick -> eczane adları listesini içermeli.")
-    return d["ph"], d.get("groups", {})
-
-
-# ----------------------------------------------------------------- EŞLEŞTİRME
+# ---------------------------------------------------------------- EŞLEŞTİRME
 def brick_score(brick, hay, dist_n, rules, groups):
-    rule = rules.get(brick, {})
+    rule = rules.get(brick, {}) if isinstance(rules.get(brick), dict) else {}
     s = sum(4 for kw in rule.get("keywords", []) if f" {norm(kw)} " in hay)
     if dist_n and any(norm(d) == dist_n for d in rule.get("districts", [])):
         s += 1
     if dist_n and PRIMARY_GROUP.get(dist_n) and groups.get(brick) == PRIMARY_GROUP[dist_n]:
         s += 1
-    toks = [t for t in norm(brick).split()
-            if t not in ("ank", "ankara") and len(t) > 2 and not t.isdigit()]
+    toks = [t for t in norm(brick).split() if t not in ("ank", "ankara") and len(t) > 2 and not t.isdigit()]
     s += sum(2 for t in toks if f" {t} " in hay)
     return s
 
 
 def pick_unique(cands, hay, dist_n, rules, groups):
-    """Skora göre tek bir kazanan döndür; beraberlikte None."""
     scored = sorted(((brick_score(b, hay, dist_n, rules, groups), b) for b in cands), reverse=True)
     if not scored or scored[0][0] <= 0:
         return None
@@ -589,27 +436,23 @@ def pick_unique(cands, hay, dist_n, rules, groups):
 
 
 def match_bricks(rows, ph_items, groups, rules):
+    """-> ({brick: [eczane]}, [eşleşmeyen])"""
     idx = {}
     for b, names in ph_items.items():
         for n in names:
-            c = core_name(n)
-            if c:
-                idx.setdefault(c, set()).add(b)
-
-    all_bricks = list(ph_items.keys())
-    result, unmatched = {}, []
-
-    GENERIC = {"ilceler", "guney", "kuzey", "dogu", "bati", "merkez"}
+            if core_name(n):
+                idx.setdefault(core_name(n), set()).add(b)
+    all_bricks = list(ph_items)
+    generic = {"ilceler", "guney", "kuzey", "dogu", "bati", "merkez"}
 
     def compatible(b, dists, hay):
-        """Brick grubu ilçeyle uyumlu mu? API'deki ilçe VE adreste geçen ilçe dikkate alınır;
-        ayrıca adreste brick adındaki mahalle/semt geçiyorsa (ör. "(Eryaman)") uyumlu sayılır."""
         allowed = GROUP_DISTRICTS.get(groups.get(b, ""))
         if allowed is None or not dists or dists & allowed:
             return True
-        toks = [t for t in re.findall(r"[a-z0-9]+", norm(b)) if len(t) >= 5 and t not in GENERIC]
+        toks = [t for t in re.findall(r"[a-z0-9]+", norm(b)) if len(t) >= 5 and t not in generic]
         return any(f" {t} " in hay for t in toks)
 
+    result, unmatched = {}, []
     for r in rows:
         key = core_name(r["name"])
         dist_n = norm(r.get("district", ""))
@@ -617,13 +460,10 @@ def match_bricks(rows, ph_items, groups, rules):
         dists = {d for d in (dist_n, norm(detect_district(r.get("address", "")))) if d}
         chosen, how, reason, cands_out = None, None, None, []
 
-        # 1) PH içinde birebir ad eşleşmesi
         cands = sorted(idx.get(key, []))
-        if cands:
+        if cands:  # 1) ph.json'da birebir ad
             pool = [b for b in cands if compatible(b, dists, hay)]
             if not pool:
-                # Ad PH'de var ama hiçbir aday brick eczanenin ilçesiyle uyumlu değil:
-                # aynı isimli başka bir eczane olabilir -> sessizce atama, raporla.
                 reason, cands_out = "district-mismatch", cands
             elif len(pool) == 1:
                 chosen, how = pool[0], "ph-name"
@@ -634,8 +474,7 @@ def match_bricks(rows, ph_items, groups, rules):
                 else:
                     reason, cands_out = "ambiguous", pool
 
-        # 2) PH'de yok -> kurallar / mahalle ipuçları
-        if not chosen and (not cands or reason == "district-mismatch"):
+        if not chosen and (not cands or reason == "district-mismatch"):  # 2) kurallar
             pool = [b for b in all_bricks if compatible(b, dists, hay)] or all_bricks
             w = pick_unique(pool, hay, dist_n, rules, groups)
             if w:
@@ -643,101 +482,188 @@ def match_bricks(rows, ph_items, groups, rules):
             elif not cands:
                 reason = "not-in-ph-no-rule"
 
-        item = {**r, "key": key, "match": how}
+        # Görünen ad: ph.json'daki yazım (eşleştiyse), değilse Türkçe büyük harf
+        canon = next((n for n in ph_items.get(chosen, []) if core_name(n) == key), None) if chosen else None
+        r = {**r, "name": canon or tr_upper(r["name"])}
         if chosen:
-            result.setdefault(chosen, []).append(item)
+            result.setdefault(chosen, []).append({**r, "key": key, "match": how})
         else:
             unmatched.append({**r, "reason": reason, "candidates": cands_out})
     return result, unmatched
 
 
-# ----------------------------------------------------------------- HTML YAZMA
-# Etiketin hemen ardından NOBET:START, kapanıştan hemen önce NOBET:END gelmek ZORUNDA.
-# (Sadece etiket metnine bakmak, başka yerde geçen aynı metni de yakalayıp kodu silebilirdi.)
+# ---------------------------------------------------------------- ph.json
+def load_ph():
+    if not PH_FILE.exists():
+        raise SystemExit(2)
+    d = json.loads(PH_FILE.read_text(encoding="utf-8"))
+    if not isinstance(d.get("ph"), dict):
+        print(f"HATA: {PH_FILE.name} içinde 'ph' (brick -> eczane adları) yok.", file=sys.stderr)
+        raise SystemExit(2)
+    return d
+
+
+def update_ph_status(ph_doc: dict, by_brick: dict, date_iso: str) -> dict:
+    """ph.json'a nöbet durumunu yazar. 'ph' ve 'groups' DEĞİŞMEZ.
+    pharmacies: ph listesindeki her (brick, eczane) için bir kayıt; nöbetçi olanlar on_duty=true.
+    Nöbetçi olmayanların adres/telefonu, daha önce öğrenildiyse korunur."""
+    prev = {(p.get("br_id"), core_name(p.get("name", ""))): p
+            for p in ph_doc.get("pharmacies", []) if isinstance(p, dict)}
+    duty = {(b, core_name(it["name"])): it for b, items in by_brick.items() for it in items}
+
+    out, used = [], set()
+    for brick, names in ph_doc["ph"].items():
+        for name in names:
+            k = (brick, core_name(name))
+            old, cur = prev.get(k, {}), duty.get(k)
+            src = cur or old
+            out.append({"br_id": brick, "name": name,
+                        "district": src.get("district", ""), "address": src.get("address", ""),
+                        "phone": src.get("phone", ""), "on_duty": cur is not None})
+            if cur:
+                used.add(k)
+    # ph listesinde olmayan ama kuralla bir bricke atanan nöbetçiler (yalnızca nöbet günü listelenir)
+    for k, it in duty.items():
+        if k not in used:
+            out.append({"br_id": k[0], "name": it["name"], "district": it.get("district", ""),
+                        "address": it.get("address", ""), "phone": it.get("phone", ""),
+                        "on_duty": True, "in_ph": False})
+
+    doc = {k: v for k, v in ph_doc.items() if k not in ("pharmacies", "on_duty_date")}
+    doc["on_duty_date"] = date_iso
+    doc["pharmacies"] = out
+    return doc
+
+
+def dump_ph(doc: dict) -> str:
+    """Mevcut ph.json biçimini (indent=0) korur; pharmacies kayıtları satır başına bir eczane."""
+    pharm = doc.get("pharmacies")
+    base = {k: v for k, v in doc.items() if k != "pharmacies"}
+    text = json.dumps(base, ensure_ascii=False, indent=0)
+    if pharm is None:
+        return text + "\n"
+    lines = ",\n".join(json.dumps(p, ensure_ascii=False) for p in pharm)
+    return text[:-2] + ',\n"pharmacies": [\n' + lines + "\n]\n}\n"
+
+
+# ---------------------------------------------------------------- index.html
 DATA_RE = re.compile(
-    r'<script id="nobet-data">\s*/\* NOBET:START \*/(?:(?!</script>).)*?/\* NOBET:END \*/\s*</script>\s*',
-    re.S)
-LEGACY_RE = re.compile(r"\n?/\* NOBET:START \*/(?:(?!</script>).)*?/\* NOBET:END \*/", re.S)
-
-
-def clean_html(html: str) -> str:
-    """Eski (bozuk) satır içi NOBET bloklarını ve eski veri script'ini temizle."""
-    for rx in (DATA_RE, LEGACY_RE):
-        for m in rx.finditer(html):
-            blk = m.group(0)
-            if len(blk) > 600_000 or "BRANS" in blk or "function" in blk:
-                raise SystemExit("HATA: temizlenecek blok beklenenden büyük/şüpheli; dosya DEĞİŞTİRİLMEDİ.")
-        html = rx.sub("", html)
-    return html
-
-
-MAIN_SCRIPT = "<script>"  # özniteliksiz tek ana script; NOBET bloğu bunun ÖNÜNE konur
+    r'<script id="nobet-data">\s*/\* NOBET:START \*/(?:(?!</script>).)*?/\* NOBET:END \*/\s*</script>\s*', re.S)
+MAIN_SCRIPT = "<script>"
 
 
 def inject(html: str, payload: dict) -> str:
     n_before = html.count("</script>")
-    had_block = bool(DATA_RE.search(html))
-    html = clean_html(html)
+    m = DATA_RE.search(html)
+    if m and (len(m.group(0)) > 600_000 or "function" in m.group(0)):
+        raise ValueError("mevcut NOBET bloğu şüpheli; index.html değiştirilmedi")
+    html = DATA_RE.sub("", html)
     pos = html.rfind(MAIN_SCRIPT)
     if pos < 0:
-        raise SystemExit("HATA: ana <script> etiketi bulunamadı.")
+        raise ValueError("index.html içinde ana <script> etiketi yok")
     js = json.dumps(payload, ensure_ascii=False, indent=1, sort_keys=True).replace("</", "<\\/")
-    block = ('<script id="nobet-data">\n/* NOBET:START */\n'
-             f"const NOBET = {js};\n/* NOBET:END */\n</script>\n")
+    block = f'<script id="nobet-data">\n/* NOBET:START */\nconst NOBET = {js};\n/* NOBET:END */\n</script>\n'
     out = html[:pos] + block + html[pos:]
-    # Güvenlik: </script> sayısı korunmalı (eski blok varsa aynı, yoksa +1) ve ana kod eksilmemeli.
-    expected = n_before if had_block else n_before + 1
-    if out.count("</script>") != expected or MAIN_SCRIPT not in out:
-        raise SystemExit("HATA: çıktı doğrulaması başarısız; index.html DEĞİŞTİRİLMEDİ.")
+    if out.count("</script>") != (n_before if m else n_before + 1):
+        raise ValueError("çıktı doğrulaması başarısız; index.html değiştirilmedi")
     return out
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--date", help="YYYY-MM-DD (varsayılan: bugün, Europe/Istanbul)")
-    ap.add_argument("--dry-run", action="store_true", help="dosyaya yazma, özet bas")
-    ap.add_argument("--rows-json", help="scrape etme; bu JSON listesini kullan (test için)")
-    ap.add_argument("--fetcher", choices=["auto", "playwright", "curl"], default="auto",
-                    help="API'ye erişim yöntemi (auto: önce playwright, olmazsa curl_cffi)")
-    ap.add_argument("--source", choices=["eczaneler", "aeo", "auto"], default="eczaneler",
-                    help="veri kaynağı (varsayılan: eczaneler.gen.tr; aeo: Eczacı Odası API'si; auto: önce AEO, olmazsa eczaneler.gen.tr)")
-    args = ap.parse_args()
+def write_if_changed(path: Path, text: str) -> bool:
+    if path.exists() and path.read_text(encoding="utf-8") == text:
+        return False
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+    return True
 
-    today = args.date or nobet_gunu()
+
+# ---------------------------------------------------------------- ANA AKIŞ
+def get_rows(args, date_iso: str):
     if args.rows_json:
-        rows = json.loads(Path(args.rows_json).read_text(encoding="utf-8"))
+        return json.loads(Path(args.rows_json).read_text(encoding="utf-8")), "rows-json"
+    if args.html_file:
+        html = Path(args.html_file).read_text(encoding="utf-8")
+        src = "html-file"
     else:
-        rows = scrape(today, args.fetcher, args.source)
+        url = build_url(date_iso)
+        print(f"[fetch] {url}")
+        html = fetch_html(url)
+        src = "eczaneler"
+        _save_debug("gentr.html", html)
+    days = parse_page(html, ref=date.fromisoformat(date_iso))
+    print("[parse] sayfadaki günler: " + (", ".join(f"{k}={len(v)}" for k, v in sorted(days.items())) or "yok"))
+    rows = days.get(date_iso, [])
+    if not rows:
+        print(f"HATA: sayfada {date_iso} tarihli liste yok.", file=sys.stderr)
+    return dedupe(rows), src
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="Ankara nöbetçi eczane güncelleyici (eczaneler.gen.tr)")
+    ap.add_argument("--date", help="YYYY-MM-DD (varsayılan: bugün, Europe/Istanbul)")
+    ap.add_argument("--dry-run", action="store_true", help="dosyalara yazma, özet göster")
+    ap.add_argument("--html-file", help="siteye gitme; kaydedilmiş sayfa HTML'ini ayrıştır")
+    ap.add_argument("--rows-json", help="siteye gitme; hazır eczane listesi (JSON) kullan")
+    ap.add_argument("--no-index", action="store_true", help="index.html'i güncelleme")
+    args = ap.parse_args(argv)
+
+    date_iso = args.date or today_tr()
+    try:
+        date.fromisoformat(date_iso)
+    except ValueError:
+        print(f"HATA: geçersiz tarih {date_iso!r} (YYYY-MM-DD olmalı)", file=sys.stderr)
+        return 2
+    print(f"[info] nöbet tarihi: {date_iso}")
+
+    for f in [PH_FILE] + ([] if args.no_index else [HTML_FILE]):
+        if not f.exists():
+            print(f"HATA: {f} bulunamadı.", file=sys.stderr)
+            return 2
+
+    try:
+        rows, source = get_rows(args, date_iso)
+    except FetchError as e:
+        print(f"HATA: sayfa indirilemedi: {e}. Ayrıntı: debug/ klasörü.", file=sys.stderr)
+        return 1
 
     rows = [r for r in rows if is_ankara(r)]
     if len(rows) < MIN_EXPECTED:
-        print(f"HATA: yalnızca {len(rows)} Ankara kaydı bulundu (min {MIN_EXPECTED}). "
-              f"index.html'e dokunulmadı. debug/ klasörüne bakın.", file=sys.stderr)
-        sys.exit(1)
+        print(f"HATA: yalnızca {len(rows)} Ankara kaydı (min {MIN_EXPECTED}); dosyalara dokunulmadı.",
+              file=sys.stderr)
+        return 1
 
-    html = clean_html(HTML_FILE.read_text(encoding="utf-8"))
-    ph_items, groups = load_ph_file()
+    ph_doc = load_ph()
     rules = json.loads(RULES_FILE.read_text(encoding="utf-8")) if RULES_FILE.exists() else {}
-
-    by_brick, unmatched = match_bricks(rows, ph_items, groups, rules)
+    rules = {k: v for k, v in rules.items() if isinstance(v, dict)}
+    by_brick, unmatched = match_bricks(rows, ph_doc["ph"], ph_doc.get("groups", {}), rules)
     matched = sum(len(v) for v in by_brick.values())
-    print(f"[match] toplam={len(rows)} eşleşen={matched} eşleşmeyen={len(unmatched)} "
-          f"brick={len(by_brick)}")
+    print(f"[match] toplam={len(rows)} eşleşen={matched} eşleşmeyen={len(unmatched)} brick={len(by_brick)}")
     for u in unmatched:
         print(f"   - {u['name']} ({u['district']}): {u['reason']} {u['candidates'] or ''}")
 
-    payload = {"date": today, "source": STATE.get("source", "rows-json"),
-               "total": len(rows), "matched": matched, "bricks": by_brick}
+    payload = {"date": date_iso, "source": source, "total": len(rows), "matched": matched,
+               "bricks": by_brick}
+    new_ph = dump_ph(update_ph_status(ph_doc, by_brick, date_iso))
+    new_unm = json.dumps({"date": date_iso, "items": unmatched}, ensure_ascii=False, indent=1)
+    try:
+        new_html = None if args.no_index else inject(HTML_FILE.read_text(encoding="utf-8"), payload)
+    except ValueError as e:
+        print(f"HATA: {e}", file=sys.stderr)
+        return 2
 
     if args.dry_run:
-        return
-
-    HTML_FILE.write_text(inject(html, payload), encoding="utf-8")
-    UNMATCHED_FILE.write_text(
-        json.dumps({"date": today, "items": unmatched}, ensure_ascii=False, indent=1),
-        encoding="utf-8")
-    print("[ok] index.html güncellendi.")
+        print("[dry-run] dosyalar yazılmadı.")
+        return 0
+    changed = [p.name for p, t in ((PH_FILE, new_ph), (UNMATCHED_FILE, new_unm), (HTML_FILE, new_html))
+               if t is not None and write_if_changed(p, t)]
+    print(f"[ok] güncellenen dosyalar: {', '.join(changed) or 'yok (değişiklik yok)'}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
+
+</file>
+
+</uploaded_files>
