@@ -1,6 +1,18 @@
 {
  "days": {
   "2026-10-16": [],
+  "2026-10-17": [
+   {
+    "name": "VERESELİ YENi ŞİFA ECZANESİ",
+    "district": "Çankaya",
+    "address": "Dodurga Mah. Odabaşı Cad. No:11/3 E Çankaya/Ankara",
+    "phone": "03122394409",
+    "lat": 39.83034853105,
+    "lng": 32.661312818527,
+    "reason": "not-in-ph-no-rule",
+    "candidates": []
+   }
+  ],
   "2026-10-18": [],
   "2026-10-19": [],
   "2026-10-20": [],
