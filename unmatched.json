@@ -1,6 +1,19 @@
 {
  "days": {
   "2026-10-24": [],
+  "2026-10-25": [
+   {
+    "name": "ABAY ECZANESİ",
+    "district": "Keçiören",
+    "address": "Köşk Mah. Anavatan Cad. No:24/A Keçiören/Ankara",
+    "phone": "0312 357 00 57",
+    "note": "Ankara Uluslararası Hastanesi Yanı",
+    "lat": 40.002599994742,
+    "lng": 32.873513684972,
+    "reason": "not-in-ph-no-rule",
+    "candidates": []
+   }
+  ],
   "2026-10-26": [],
   "2026-10-27": [],
   "2026-10-28": [],
