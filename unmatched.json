@@ -1,7 +1,7 @@
 {
  "days": {
-  "2026-10-26": [],
   "2026-10-27": [],
+  "2026-10-28": [],
   "2026-10-29": [],
   "2026-10-30": [],
   "2026-10-31": [
@@ -36,6 +36,19 @@
      "ANK POLATLI -1",
      "ANK POLATLI -2"
     ]
+   }
+  ],
+  "2026-11-06": [
+   {
+    "name": "BATIPORT ECZANESİ",
+    "district": "Yenimahalle",
+    "address": "Uğur Mumcu Mah. 1606. Sok. No:6/37 Batıport AVM Batıkent/ Yenimahalle/ANKARA",
+    "phone": "05421817637",
+    "note": "Vedat Dalokay Parkı yanı",
+    "lat": 39.963496712331,
+    "lng": 32.735696509071,
+    "reason": "not-in-ph-no-rule",
+    "candidates": []
    }
   ]
  }
