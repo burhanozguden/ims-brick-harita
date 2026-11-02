@@ -1,19 +1,7 @@
 {
  "days": {
-  "2026-10-31": [
-   {
-    "name": "ABAY ECZANESİ",
-    "district": "Keçiören",
-    "address": "Köşk Mah. Anavatan Cad. No:24/A Keçiören/Ankara",
-    "phone": "0312 357 00 57",
-    "note": "Ankara Uluslararası Hastanesi Yanı",
-    "lat": 40.002599994742,
-    "lng": 32.873513684972,
-    "reason": "not-in-ph-no-rule",
-    "candidates": []
-   }
-  ],
   "2026-11-01": [],
+  "2026-11-02": [],
   "2026-11-03": [],
   "2026-11-04": [],
   "2026-11-05": [
@@ -49,6 +37,19 @@
   "2026-11-07": [],
   "2026-11-08": [],
   "2026-11-09": [],
-  "2026-11-10": []
+  "2026-11-10": [],
+  "2026-11-11": [
+   {
+    "name": "KOZA ECZANESİ",
+    "district": "Çankaya",
+    "address": "Kazım Özalp Mah. Koza Cad.Boranoğlu Apt.No:16/B Çankaya/ANKARA",
+    "phone": "03124414841",
+    "note": "Migros Karşısı",
+    "lat": 39.8881496,
+    "lng": 32.8712957,
+    "reason": "not-in-ph-no-rule",
+    "candidates": []
+   }
+  ]
  }
 }
