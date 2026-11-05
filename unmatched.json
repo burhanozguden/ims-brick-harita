@@ -1,7 +1,23 @@
 {
  "days": {
-  "2026-11-03": [],
   "2026-11-04": [],
+  "2026-11-05": [
+   {
+    "name": "ERDEM ECZANESİ",
+    "district": "Polatlı",
+    "address": "Fatih Mah. Atatürk Cad. No:162/A Polatlı/ ANKARA",
+    "phone": "03126239797",
+    "note": "Polatlı Kaymakamlığı ilerisi",
+    "lat": 39.575609827105,
+    "lng": 32.125853777325,
+    "reason": "ambiguous",
+    "candidates": [
+     "ANK GUNEY ILCELER",
+     "ANK POLATLI -1",
+     "ANK POLATLI -2"
+    ]
+   }
+  ],
   "2026-11-06": [
    {
     "name": "BATIPORT ECZANESİ",
@@ -33,6 +49,7 @@
    }
   ],
   "2026-11-12": [],
-  "2026-11-13": []
+  "2026-11-13": [],
+  "2026-11-14": []
  }
 }
