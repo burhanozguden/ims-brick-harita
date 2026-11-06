@@ -18,19 +18,6 @@
     ]
    }
   ],
-  "2026-11-06": [
-   {
-    "name": "BATIPORT ECZANESİ",
-    "district": "Yenimahalle",
-    "address": "Uğur Mumcu Mah. 1606. Sok. No:6/37 Batıport AVM Batıkent/ Yenimahalle/ANKARA",
-    "phone": "05421817637",
-    "note": "Vedat Dalokay Parkı yanı",
-    "lat": 39.963496712331,
-    "lng": 32.735696509071,
-    "reason": "not-in-ph-no-rule",
-    "candidates": []
-   }
-  ],
   "2026-11-07": [],
   "2026-11-08": [],
   "2026-11-09": [],
