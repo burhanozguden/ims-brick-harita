@@ -2,19 +2,6 @@
  "days": {
   "2026-11-09": [],
   "2026-11-10": [],
-  "2026-11-11": [
-   {
-    "name": "KOZA ECZANESİ",
-    "district": "Çankaya",
-    "address": "Kazım Özalp Mah. Koza Cad.Boranoğlu Apt.No:16/B Çankaya/ANKARA",
-    "phone": "03124414841",
-    "note": "Migros Karşısı",
-    "lat": 39.8881496,
-    "lng": 32.8712957,
-    "reason": "not-in-ph-no-rule",
-    "candidates": []
-   }
-  ],
   "2026-11-12": [],
   "2026-11-13": [],
   "2026-11-14": [],
