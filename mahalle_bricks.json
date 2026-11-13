@@ -1,5 +1,6 @@
 {
 "_aciklama": "Otomatik öğrenilir: 'ilçe|mahalle' -> {brick: [o mahallede adıyla eşleşmiş eczaneler]}. Adı ph.json'da olmayan nöbetçi, bu tabloda tek bir brick öne çıkıyorsa o bricke atanır. Yanlış bir kaydı elle silebilirsiniz.",
+"akyurt|ataturk": {"ANK SINCAN ATATURK": ["ÖZGE ECZANESİ"]},
 "akyurt|beyazit": {"ANK DOGU ILCELER": ["AKYURT MERKEZ ECZANESİ", "ESRA ERBEYİ ECZANESİ", "KIVANÇ ECZANESİ"]},
 "akyurt|yesiltepe": {"ANK DOGU ILCELER": ["AKYURT OKAN ECZANESİ", "YEŞİLTEPE ANADOLU ECZANESİ", "YEŞİLTEPE ECZANESİ"]},
 "akyurt|yildirim": {"ANK DOGU ILCELER": ["GÜNEŞ ECZANESİ", "HAYAT ECZANESİ", "NUR ECZANESİ", "İREM AŞIK ECZANESİ"]},
